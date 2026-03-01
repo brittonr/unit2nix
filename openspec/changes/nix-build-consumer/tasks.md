@@ -40,4 +40,4 @@
 - [x] 5.2 Execute the sample binary and verify it prints expected output
 - [x] 5.3 Verify proc-macro derive works in the built binary
 - [x] 5.4 Verify build script env var is baked into the built library
-- [ ] 5.5 Run against aspen's `build-plan.json` to verify it handles a real 453-crate workspace (compilation check, not full build)
+- [x] 5.5 Run against aspen's `build-plan.json` to verify it handles a real 453-crate workspace (compilation check, not full build)
