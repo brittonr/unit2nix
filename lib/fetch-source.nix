@@ -14,7 +14,7 @@ let
   source = crateInfo.source or null;
   sourceType = if source == null then "local" else source.type or "local";
 in
-if sourceType == "local" then
+if sourceType == "local" || sourceType == null then
   let
     relPath = if source == null then "." else source.path or ".";
     rawSrc = if relPath == "." then src else src + "/${relPath}";
@@ -38,6 +38,18 @@ else if sourceType == "crates-io" then
     url = "https://static.crates.io/crates/${crateInfo.crateName}/${crateInfo.crateName}-${crateInfo.version}.crate";
     sha256 = crateInfo.sha256;
   }
+
+else if sourceType == "registry" then
+  # Alternative registry — download URL must be provided via crate overrides
+  # since there's no standard download URL convention across registries.
+  # The source.index field contains the registry index URL for reference.
+  builtins.throw ''
+    Crate ${crateInfo.crateName}-${crateInfo.version} uses alternative registry: ${source.index or "unknown"}
+    Alternative registries are not yet auto-fetched. Provide the source via defaultCrateOverrides:
+      defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+        ${crateInfo.crateName} = attrs: { src = fetchurl { ... }; };
+      };
+  ''
 
 else if sourceType == "git" then
   let

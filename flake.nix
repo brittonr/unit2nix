@@ -42,6 +42,32 @@
               ;
           };
 
+        # The unit2nix binary itself
+        unit2nix = pkgs.rustPlatform.buildRustPackage {
+          pname = "unit2nix";
+          version = "0.1.0";
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter =
+              path: type:
+              let
+                baseName = builtins.baseNameOf path;
+              in
+              (pkgs.lib.cleanSourceFilter path type)
+              && baseName != "target"
+              && baseName != "sample_workspace"
+              && baseName != "tests"
+              && baseName != "openspec"
+              && baseName != "result";
+          };
+          cargoLock.lockFile = ./Cargo.lock;
+          meta = {
+            description = "Per-crate Nix build plans from Cargo's unit graph";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "unit2nix";
+          };
+        };
+
         # Sample workspace build
         sampleWorkspace = buildFromUnitGraph {
           inherit pkgs;
@@ -57,6 +83,8 @@
 
         # Packages
         packages = {
+          default = unit2nix;
+          inherit unit2nix;
           sample = sampleWorkspace.allWorkspaceMembers;
           sample-bin = sampleWorkspace.workspaceMembers."sample-bin".build;
         };

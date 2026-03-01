@@ -189,6 +189,11 @@ struct NixCrate {
 #[serde(tag = "type", rename_all = "kebab-case")]
 enum NixSource {
     CratesIo,
+    /// Non-crates.io registry (e.g. corporate Artifactory).
+    Registry {
+        /// Registry index URL.
+        index: String,
+    },
     Local { path: String },
     Git {
         url: String,
@@ -299,7 +304,17 @@ fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str)
                 path: path.to_string(),
             })
         }
-        Some(s) if s.starts_with("registry+") => Some(NixSource::CratesIo),
+        Some(s) if s.starts_with("registry+") => {
+            // Extract registry URL for non-crates.io registries
+            let registry_url = s.strip_prefix("registry+").unwrap_or("");
+            if registry_url == "https://github.com/rust-lang/crates.io-index" {
+                Some(NixSource::CratesIo)
+            } else {
+                Some(NixSource::Registry {
+                    index: registry_url.to_string(),
+                })
+            }
+        }
         Some(s) if s.starts_with("git+") => {
             // Format: git+URL?rev=HASH#HASH or git+URL#HASH
             let without_prefix = s.strip_prefix("git+").unwrap_or(s);
@@ -351,6 +366,40 @@ fn compute_git_subdir(manifest_path: &str) -> Option<String> {
 
     let sub = parts[root_idx..end_idx].join("/");
     if sub.is_empty() { None } else { Some(sub) }
+}
+
+/// Infer source type from a package ID when metadata is missing.
+///
+/// Some crates appear in the unit graph but not in `cargo metadata` (e.g.,
+/// transitive deps pulled in by feature-specific resolution that metadata's
+/// resolver doesn't include). The pkg_id format encodes the source:
+/// - `registry+https://...#name@version` → crates.io or alternative registry
+/// - `path+file:///...#version` → local
+/// - `git+https://...#hash` → git
+fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
+    if pkg_id.starts_with("registry+https://github.com/rust-lang/crates.io-index") {
+        Some(NixSource::CratesIo)
+    } else if pkg_id.starts_with("registry+") {
+        let registry_url = pkg_id
+            .strip_prefix("registry+")?
+            .split('#')
+            .next()?;
+        Some(NixSource::Registry {
+            index: registry_url.to_string(),
+        })
+    } else if pkg_id.starts_with("git+") {
+        let without_prefix = pkg_id.strip_prefix("git+")?;
+        let (url_part, rev) = without_prefix.rsplit_once('#')?;
+        let url = url_part.split('?').next()?.to_string();
+        Some(NixSource::Git {
+            url,
+            rev: rev.to_string(),
+            sub_dir: None,
+        })
+    } else {
+        // path+ or unknown — local
+        None
+    }
 }
 
 /// Returns true if the target kind represents a library (lib, rlib, cdylib, etc).
@@ -528,14 +577,18 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock, tar
             .get(&(crate_name.as_str(), version.as_str()))
             .map(|s| s.to_string());
 
-        // Source info
-        let source = meta_pkg.and_then(|m| {
-            parse_source(
-                m.source.as_deref(),
-                &m.manifest_path,
-                &metadata.workspace_root,
-            )
-        });
+        // Source info: prefer metadata, fall back to inferring from pkg_id.
+        // Some crates appear in the unit graph but not in cargo metadata
+        // (e.g., transitive deps pulled in by feature-specific resolution).
+        let source = meta_pkg
+            .and_then(|m| {
+                parse_source(
+                    m.source.as_deref(),
+                    &m.manifest_path,
+                    &metadata.workspace_root,
+                )
+            })
+            .or_else(|| infer_source_from_pkg_id(pkg_id));
 
         // Crate root directory (from manifest_path, strip /Cargo.toml)
         let crate_root = meta_pkg
@@ -780,6 +833,21 @@ mod tests {
             "",
         );
         assert!(matches!(source, Some(NixSource::CratesIo)));
+    }
+
+    #[test]
+    fn parse_source_alternative_registry() {
+        let source = parse_source(
+            Some("registry+https://dl.cloudsmith.io/public/my-org/my-repo/cargo/index.git"),
+            "",
+            "",
+        );
+        match source {
+            Some(NixSource::Registry { index }) => {
+                assert_eq!(index, "https://dl.cloudsmith.io/public/my-org/my-repo/cargo/index.git");
+            }
+            other => panic!("expected Registry, got {other:?}"),
+        }
     }
 
     #[test]
