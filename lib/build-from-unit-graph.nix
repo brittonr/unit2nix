@@ -29,13 +29,6 @@ let
   resolved = builtins.fromJSON (builtins.readFile resolvedJson);
   fetchSource = import ./fetch-source.nix { inherit pkgs src; };
 
-  # Sanitize a package ID into a valid Nix attribute name.
-  # Package IDs contain characters like +, :, /, # that aren't valid.
-  sanitizeId = id: builtins.replaceStrings
-    [ "+" ":" "/" "#" "@" "?" "=" "." " " ]
-    [ "_" "_" "_" "_" "_" "_" "_" "_" "_" ]
-    id;
-
   # Build the recursive crate set for a given pkgs instance.
   mkBuiltByPackageIdByPkgs =
     cratePkgs:
@@ -114,12 +107,14 @@ let
         crateName = crateInfo.crateName;
         version = crateInfo.version;
         edition = crateInfo.edition or "2021";
-        sha256 = crateInfo.sha256 or "";
         src = crateSrc;
         inherit dependencies buildDependencies crateRenames;
         features = crateInfo.features or [ ];
         procMacro = crateInfo.procMacro or false;
         crateBin = crateInfo.crateBin or [ ];
+      }
+      // lib.optionalAttrs ((crateInfo.sha256 or null) != null) {
+        sha256 = crateInfo.sha256;
       }
       // lib.optionalAttrs ((crateInfo.libPath or null) != null) {
         libPath = crateInfo.libPath;

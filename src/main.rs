@@ -29,6 +29,14 @@ struct Cli {
     #[arg(short, long)]
     package: Option<String>,
 
+    /// Enable all features
+    #[arg(long)]
+    all_features: bool,
+
+    /// Do not activate the `default` feature
+    #[arg(long)]
+    no_default_features: bool,
+
     /// Output file (default: stdout)
     #[arg(short, long)]
     output: Option<String>,
@@ -63,6 +71,7 @@ struct UnitTarget {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct UnitDep {
     index: usize,
     extern_crate_name: String,
@@ -81,6 +90,7 @@ struct CargoMetadata {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct MetadataPackage {
     id: String,
     name: String,
@@ -92,6 +102,7 @@ struct MetadataPackage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct MetadataTarget {
     kind: Vec<String>,
     name: String,
@@ -108,6 +119,7 @@ struct CargoLock {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LockPackage {
     name: String,
     version: String,
@@ -140,7 +152,6 @@ struct NixCrate {
     dependencies: Vec<NixDep>,
     build_dependencies: Vec<NixDep>,
     proc_macro: bool,
-    has_build_script: bool,
     lib_path: Option<String>,
     lib_name: Option<String>,
     lib_crate_types: Vec<String>,
@@ -175,11 +186,17 @@ struct NixBinTarget {
 
 fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["build", "--unit-graph", "-Z", "unstable-options"]);
+    cmd.args(["build", "--unit-graph", "-Z", "unstable-options", "--locked"]);
     cmd.args(["--manifest-path", &cli.manifest_path]);
 
     if let Some(features) = &cli.features {
         cmd.args(["--features", features]);
+    }
+    if cli.all_features {
+        cmd.arg("--all-features");
+    }
+    if cli.no_default_features {
+        cmd.arg("--no-default-features");
     }
     if let Some(bin) = &cli.bin {
         cmd.args(["--bin", bin]);
@@ -199,7 +216,7 @@ fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 
 fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["metadata", "--format-version=1"]);
+    cmd.args(["metadata", "--format-version=1", "--locked"]);
     cmd.args(["--manifest-path", &cli.manifest_path]);
 
     let output = cmd.output().context("failed to run `cargo metadata`")?;
@@ -257,6 +274,12 @@ fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str)
         }
         _ => None,
     }
+}
+
+/// Returns true if the target kind represents a library (lib, rlib, cdylib, etc).
+fn is_lib_kind(kind: &[String]) -> bool {
+    kind.iter()
+        .any(|k| matches!(k.as_str(), "lib" | "rlib" | "cdylib" | "dylib" | "staticlib"))
 }
 
 /// Extract name@version from a pkg_id string.
@@ -317,10 +340,10 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
     let mut crates = BTreeMap::new();
 
     for (pkg_id, units) in &pkg_units {
-        // Find the primary lib unit (or first bin unit)
+        // Find the primary lib unit (lib/rlib/cdylib/dylib/staticlib or proc-macro)
         let lib_unit = units
             .iter()
-            .find(|(_, u)| u.mode == "build" && u.target.kind.contains(&"lib".to_string()))
+            .find(|(_, u)| u.mode == "build" && is_lib_kind(&u.target.kind))
             .or_else(|| {
                 units
                     .iter()
@@ -474,7 +497,6 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
                 dependencies,
                 build_dependencies,
                 proc_macro,
-                has_build_script: build_script_unit.is_some(),
                 lib_path,
                 lib_name,
                 lib_crate_types,
@@ -490,6 +512,32 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
         .iter()
         .map(|&idx| unit_graph.units[idx].pkg_id.clone())
         .collect();
+
+    // Validate: every dependency reference must resolve to a crate in the plan
+    let mut missing_refs: Vec<(String, String)> = Vec::new();
+    for (pkg_id, crate_info) in &crates {
+        for dep in &crate_info.dependencies {
+            if !crates.contains_key(&dep.package_id) {
+                missing_refs.push((pkg_id.clone(), dep.package_id.clone()));
+            }
+        }
+        for dep in &crate_info.build_dependencies {
+            if !crates.contains_key(&dep.package_id) {
+                missing_refs.push((pkg_id.clone(), dep.package_id.clone()));
+            }
+        }
+    }
+    if !missing_refs.is_empty() {
+        eprintln!("ERROR: {} dangling dependency references:", missing_refs.len());
+        for (from, to) in &missing_refs {
+            let from_name = crates.get(from).map(|c| c.crate_name.as_str()).unwrap_or("?");
+            eprintln!("  {from_name} ({from}) -> {to}");
+        }
+        bail!(
+            "{} dependencies reference crates not in the build plan (likely a missing crate kind — see unit2nix bug tracker)",
+            missing_refs.len()
+        );
+    }
 
     Ok(NixBuildPlan {
         version: 1,

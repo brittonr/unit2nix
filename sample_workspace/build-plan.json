@@ -31,7 +31,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [],
@@ -56,7 +55,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -90,7 +88,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -112,7 +109,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": true,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -133,7 +129,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -157,7 +152,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -185,7 +179,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -213,7 +206,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -248,7 +240,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -272,7 +263,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -308,7 +298,6 @@
       ],
       "buildDependencies": [],
       "procMacro": true,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -349,7 +338,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -389,7 +377,6 @@
       ],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -410,7 +397,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": false,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [
@@ -431,7 +417,6 @@
       "dependencies": [],
       "buildDependencies": [],
       "procMacro": false,
-      "hasBuildScript": true,
       "libPath": null,
       "libName": null,
       "libCrateTypes": [

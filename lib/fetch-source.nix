@@ -2,6 +2,10 @@
 #
 # Takes the workspace `src` and a single crate's info from the build plan.
 # Returns a path suitable for buildRustCrate's `src` argument.
+#
+# Local sources are filtered to exclude target/, .git/, and editor temp files.
+# crates-io sources use fetchurl with SHA256 from Cargo.lock.
+# Git sources use builtins.fetchGit with a pinned rev.
 
 { pkgs, src }:
 
@@ -13,8 +17,20 @@ in
 if sourceType == "local" then
   let
     relPath = if source == null then "." else source.path or ".";
+    rawSrc = if relPath == "." then src else src + "/${relPath}";
   in
-  if relPath == "." then src else src + "/${relPath}"
+  pkgs.lib.cleanSourceWith {
+    src = rawSrc;
+    filter =
+      path: type:
+      let
+        baseName = builtins.baseNameOf path;
+      in
+      # Standard VCS/editor filtering
+      (pkgs.lib.cleanSourceFilter path type)
+      # Cargo build artifacts
+      && baseName != "target";
+  }
 
 else if sourceType == "crates-io" then
   pkgs.fetchurl {
