@@ -37,6 +37,10 @@ struct Cli {
     #[arg(long)]
     no_default_features: bool,
 
+    /// Target triple for cross-compilation (e.g. aarch64-unknown-linux-gnu)
+    #[arg(long)]
+    target: Option<String>,
+
     /// Output file (default: stdout)
     #[arg(short, long)]
     output: Option<String>,
@@ -99,6 +103,11 @@ struct MetadataPackage {
     targets: Vec<MetadataTarget>,
     links: Option<String>,
     manifest_path: String,
+    authors: Option<Vec<String>>,
+    description: Option<String>,
+    homepage: Option<String>,
+    license: Option<String>,
+    repository: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +146,11 @@ struct NixBuildPlan {
     version: u32,
     workspace_root: String,
     roots: Vec<String>,
+    /// Workspace member name → package ID (from cargo metadata).
+    workspace_members: BTreeMap<String, String>,
+    /// Target triple this plan was resolved for (null = host).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
     crates: BTreeMap<String, NixCrate>,
 }
 
@@ -158,6 +172,17 @@ struct NixCrate {
     lib_crate_types: Vec<String>,
     crate_bin: Vec<NixBinTarget>,
     links: Option<String>,
+    // Package metadata (for CARGO_PKG_* env vars in build scripts)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    authors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    homepage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    license: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,7 +190,14 @@ struct NixCrate {
 enum NixSource {
     CratesIo,
     Local { path: String },
-    Git { url: String, rev: String },
+    Git {
+        url: String,
+        rev: String,
+        /// Subdirectory within the git repo (for monorepo deps).
+        /// Only present when the crate isn't at the repo root.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sub_dir: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -205,6 +237,9 @@ fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     if let Some(package) = &cli.package {
         cmd.args(["--package", package]);
     }
+    if let Some(target) = &cli.target {
+        cmd.args(["--target", target]);
+    }
 
     let output = cmd.output().context("failed to run `cargo build --unit-graph`")?;
     if !output.status.success() {
@@ -243,6 +278,10 @@ fn read_cargo_lock(manifest_path: &str) -> Result<CargoLock> {
 }
 
 /// Parse source string from cargo metadata into a NixSource.
+///
+/// For git dependencies, computes `sub_dir` from the manifest_path relative
+/// to Cargo's git checkout cache. This handles monorepo git deps where the
+/// crate lives in a subdirectory (e.g., `{ git = "...", subdirectory = "crates/foo" }`).
 fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str) -> Option<NixSource> {
     match source {
         None => {
@@ -271,10 +310,47 @@ fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str)
             };
             // Strip query params from URL
             let url = url_part.split('?').next().unwrap_or(&url_part).to_string();
-            Some(NixSource::Git { url, rev })
+
+            // Compute subdirectory from manifest_path.
+            // Cargo's git checkout lives at ~/.cargo/git/checkouts/<repo>/<hash>/
+            // The manifest_path is e.g. ~/.cargo/git/checkouts/repo/abc123/crates/foo/Cargo.toml
+            // We want sub_dir = "crates/foo"
+            let sub_dir = compute_git_subdir(manifest_path);
+
+            Some(NixSource::Git { url, rev, sub_dir })
         }
         _ => None,
     }
+}
+
+/// Compute the subdirectory of a crate within a git checkout.
+///
+/// Cargo stores git checkouts at `~/.cargo/git/checkouts/<name>/<hash>/`.
+/// If the crate's Cargo.toml is at `.../checkouts/<name>/<hash>/sub/path/Cargo.toml`,
+/// this returns `Some("sub/path")`. Returns `None` if the crate is at the repo root.
+fn compute_git_subdir(manifest_path: &str) -> Option<String> {
+    // Look for the checkouts/<name>/<hash>/ pattern
+    let parts: Vec<&str> = manifest_path.split('/').collect();
+    let checkout_idx = parts.iter().position(|&p| p == "checkouts")?;
+
+    // checkouts/<name>/<hash>/ is 3 components after "checkouts"
+    let root_idx = checkout_idx + 3;
+    if root_idx >= parts.len() {
+        return None;
+    }
+
+    // Everything between the checkout root and "Cargo.toml" is the subdirectory
+    let end_idx = parts.len() - 1; // skip "Cargo.toml"
+    if parts[end_idx] != "Cargo.toml" {
+        return None;
+    }
+
+    if end_idx <= root_idx {
+        return None; // Crate is at repo root
+    }
+
+    let sub = parts[root_idx..end_idx].join("/");
+    if sub.is_empty() { None } else { Some(sub) }
 }
 
 /// Returns true if the target kind represents a library (lib, rlib, cdylib, etc).
@@ -303,7 +379,7 @@ fn parse_pkg_id(pkg_id: &str) -> (String, String) {
     ("unknown".to_string(), "0.0.0".to_string())
 }
 
-fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> Result<NixBuildPlan> {
+fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock, target: Option<&str>) -> Result<NixBuildPlan> {
     // Index metadata packages by their id
     let meta_by_id: BTreeMap<&str, &MetadataPackage> = metadata
         .packages
@@ -530,6 +606,15 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
             if rel == "build.rs" { None } else { Some(rel) }
         });
 
+        // Package metadata for CARGO_PKG_* env vars
+        let authors = meta_pkg
+            .and_then(|m| m.authors.clone())
+            .unwrap_or_default();
+        let description = meta_pkg.and_then(|m| m.description.clone());
+        let homepage = meta_pkg.and_then(|m| m.homepage.clone());
+        let license = meta_pkg.and_then(|m| m.license.clone());
+        let repository = meta_pkg.and_then(|m| m.repository.clone());
+
         crates.insert(
             pkg_id.to_string(),
             NixCrate {
@@ -548,6 +633,11 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
                 lib_crate_types,
                 crate_bin,
                 links,
+                authors,
+                description,
+                homepage,
+                license,
+                repository,
             },
         );
     }
@@ -557,6 +647,23 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
         .roots
         .iter()
         .map(|&idx| unit_graph.units[idx].pkg_id.clone())
+        .collect();
+
+    // Workspace members: map name → package ID for members present in the build plan.
+    // Only includes members that actually appear in the resolved dependency graph,
+    // not all workspace members (some may be excluded by feature/package selection).
+    let workspace_members: BTreeMap<String, String> = metadata
+        .workspace_members
+        .iter()
+        .filter_map(|wm_id| {
+            // workspace_member IDs match the pkg_id format used as keys in crates
+            if crates.contains_key(wm_id) {
+                let name = crates[wm_id].crate_name.clone();
+                Some((name, wm_id.clone()))
+            } else {
+                None
+            }
+        })
         .collect();
 
     // Validate: every dependency reference must resolve to a crate in the plan
@@ -589,6 +696,8 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
         version: 1,
         workspace_root: metadata.workspace_root.clone(),
         roots,
+        workspace_members,
+        target: target.map(|s| s.to_string()),
         crates,
     })
 }
@@ -615,8 +724,12 @@ fn main() -> Result<()> {
     );
 
     eprintln!("Merging...");
-    let plan = merge(&unit_graph, &metadata, &lock)?;
+    let plan = merge(&unit_graph, &metadata, &lock, cli.target.as_deref())?;
     eprintln!("  {} crates in build plan", plan.crates.len());
+    eprintln!("  {} workspace members", plan.workspace_members.len());
+    if let Some(ref t) = plan.target {
+        eprintln!("  target: {t}");
+    }
 
     let json = serde_json::to_string_pretty(&plan)?;
 
@@ -691,15 +804,57 @@ mod tests {
     fn parse_source_git() {
         let source = parse_source(
             Some("git+https://github.com/example/repo.git?rev=abc123#abc123def456"),
-            "",
+            "/home/user/.cargo/git/checkouts/repo/abc123/Cargo.toml",
             "",
         );
         match source {
-            Some(NixSource::Git { url, rev }) => {
+            Some(NixSource::Git { url, rev, sub_dir }) => {
                 assert_eq!(url, "https://github.com/example/repo.git");
                 assert_eq!(rev, "abc123def456");
+                assert_eq!(sub_dir, None, "root-level crate should have no sub_dir");
             }
             other => panic!("expected Git, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_source_git_subdir() {
+        let source = parse_source(
+            Some("git+https://github.com/org/monorepo.git?rev=abc123#abc123def456"),
+            "/home/user/.cargo/git/checkouts/monorepo/abc123/crates/my-crate/Cargo.toml",
+            "",
+        );
+        match source {
+            Some(NixSource::Git { url, rev, sub_dir }) => {
+                assert_eq!(url, "https://github.com/org/monorepo.git");
+                assert_eq!(rev, "abc123def456");
+                assert_eq!(sub_dir, Some("crates/my-crate".to_string()));
+            }
+            other => panic!("expected Git with sub_dir, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compute_git_subdir_root() {
+        assert_eq!(
+            compute_git_subdir("/home/user/.cargo/git/checkouts/repo/abc123/Cargo.toml"),
+            None
+        );
+    }
+
+    #[test]
+    fn compute_git_subdir_nested() {
+        assert_eq!(
+            compute_git_subdir("/home/user/.cargo/git/checkouts/repo/abc123/sub/path/Cargo.toml"),
+            Some("sub/path".to_string())
+        );
+    }
+
+    #[test]
+    fn compute_git_subdir_no_checkouts() {
+        assert_eq!(
+            compute_git_subdir("/some/random/path/Cargo.toml"),
+            None
+        );
     }
 }

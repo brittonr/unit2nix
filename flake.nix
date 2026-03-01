@@ -58,15 +58,7 @@
         # Packages
         packages = {
           sample = sampleWorkspace.allWorkspaceMembers;
-          sample-bin =
-            let
-              binPkgId = builtins.head (
-                builtins.filter (
-                  id: (sampleWorkspace.resolved.crates.${id}).crateName == "sample-bin"
-                ) (builtins.attrNames sampleWorkspace.resolved.crates)
-              );
-            in
-            sampleWorkspace.builtCrates.crates.${binPkgId};
+          sample-bin = sampleWorkspace.workspaceMembers."sample-bin".build;
         };
 
         # Checks

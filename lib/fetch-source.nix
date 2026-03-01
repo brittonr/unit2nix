@@ -40,10 +40,14 @@ else if sourceType == "crates-io" then
   }
 
 else if sourceType == "git" then
-  builtins.fetchGit {
-    url = source.url;
-    rev = source.rev;
-  }
+  let
+    repo = builtins.fetchGit {
+      url = source.url;
+      rev = source.rev;
+    };
+    subDir = source.subDir or null;
+  in
+  if subDir != null then repo + "/${subDir}" else repo
 
 else
   # Fallback: treat as local

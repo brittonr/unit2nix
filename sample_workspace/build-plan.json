@@ -2,8 +2,17 @@
   "version": 1,
   "workspaceRoot": "/home/brittonr/git/unit2nix/sample_workspace",
   "roots": [
-    "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0"
+    "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0",
+    "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-build-script#0.1.0",
+    "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-lib#0.1.0",
+    "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-macro#0.1.0"
   ],
+  "workspaceMembers": {
+    "sample-bin": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0",
+    "sample-build-script": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-build-script#0.1.0",
+    "sample-lib": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-lib#0.1.0",
+    "sample-macro": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-macro#0.1.0"
+  },
   "crates": {
     "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0": {
       "crateName": "sample-bin",
@@ -140,7 +149,13 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "Fast integer primitive to string conversion",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/itoa"
     },
     "registry+https://github.com/rust-lang/crates.io-index#memchr@2.8.0": {
       "crateName": "memchr",
@@ -164,7 +179,15 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "Andrew Gallant <jamslam@gmail.com>",
+        "bluss"
+      ],
+      "description": "Provides extremely fast (uses SIMD on x86_64, aarch64 and wasm32) routines for\n1, 2 or 3 byte search and single substring search.\n",
+      "homepage": "https://github.com/BurntSushi/memchr",
+      "license": "Unlicense OR MIT",
+      "repository": "https://github.com/BurntSushi/memchr"
     },
     "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106": {
       "crateName": "proc-macro2",
@@ -192,7 +215,14 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>",
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "description": "A substitute implementation of the compiler's `proc_macro` API to decouple token-based libraries from the procedural macro use case.",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/proc-macro2"
     },
     "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.44": {
       "crateName": "quote",
@@ -220,7 +250,13 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "Quasi-quoting macro quote!(...)",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/quote"
     },
     "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228": {
       "crateName": "serde",
@@ -255,7 +291,15 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "A generic serialization/deserialization framework",
+      "homepage": "https://serde.rs",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/serde"
     },
     "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.228": {
       "crateName": "serde_core",
@@ -279,7 +323,15 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "Serde traits only, with no support for derive -- use the `serde` crate instead",
+      "homepage": "https://serde.rs",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/serde"
     },
     "registry+https://github.com/rust-lang/crates.io-index#serde_derive@1.0.228": {
       "crateName": "serde_derive",
@@ -315,7 +367,15 @@
         "proc-macro"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "Macros 1.1 implementation of #[derive(Serialize, Deserialize)]",
+      "homepage": "https://serde.rs",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/serde"
     },
     "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.149": {
       "crateName": "serde_json",
@@ -356,7 +416,14 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "A JSON serialization file format",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/json"
     },
     "registry+https://github.com/rust-lang/crates.io-index#syn@2.0.117": {
       "crateName": "syn",
@@ -396,7 +463,13 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "Parser for Rust source code",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/syn"
     },
     "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24": {
       "crateName": "unicode-ident",
@@ -417,7 +490,13 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "Determine whether characters have the XID_Start or XID_Continue properties according to Unicode Standard Annex #31",
+      "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "repository": "https://github.com/dtolnay/unicode-ident"
     },
     "registry+https://github.com/rust-lang/crates.io-index#zmij@1.0.21": {
       "crateName": "zmij",
@@ -438,7 +517,13 @@
         "lib"
       ],
       "crateBin": [],
-      "links": null
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "description": "A double-to-string conversion algorithm based on Schubfach and yy",
+      "license": "MIT",
+      "repository": "https://github.com/dtolnay/zmij"
     }
   }
 }

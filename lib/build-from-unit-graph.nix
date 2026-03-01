@@ -112,6 +112,7 @@ let
         features = crateInfo.features or [ ];
         procMacro = crateInfo.procMacro or false;
         crateBin = crateInfo.crateBin or [ ];
+        authors = crateInfo.authors or [ ];
       }
       // lib.optionalAttrs ((crateInfo.sha256 or null) != null) {
         sha256 = crateInfo.sha256;
@@ -135,25 +136,17 @@ let
 
   builtCrates = mkBuiltByPackageIdByPkgs pkgs;
 
-  # Find workspace member package IDs by matching local source paths
-  # against crate names in the JSON.
-  workspaceMemberIds = lib.filterAttrs (
-    _packageId: crateInfo:
-    let
-      source = crateInfo.source or null;
-      sourceType = if source == null then "local" else source.type or "local";
-    in
-    sourceType == "local"
-  ) resolved.crates;
-
 in
 {
+  # Workspace members keyed by crate name → { packageId, build }.
+  # Uses the explicit workspaceMembers map from the JSON (set by cargo metadata),
+  # not a heuristic based on source type.
   workspaceMembers = lib.mapAttrs (
-    packageId: crateInfo: {
+    _name: packageId: {
       inherit packageId;
       build = builtCrates.crates.${packageId};
     }
-  ) workspaceMemberIds;
+  ) (resolved.workspaceMembers or { });
 
   rootCrate =
     let
@@ -171,8 +164,8 @@ in
   allWorkspaceMembers = pkgs.symlinkJoin {
     name = "all-workspace-members";
     paths = lib.mapAttrsToList (
-      packageId: _crateInfo: builtCrates.crates.${packageId}
-    ) workspaceMemberIds;
+      _name: packageId: builtCrates.crates.${packageId}
+    ) (resolved.workspaceMembers or { });
   };
 
   inherit resolved;
