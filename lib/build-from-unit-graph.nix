@@ -116,6 +116,9 @@ let
       // lib.optionalAttrs ((crateInfo.sha256 or null) != null) {
         sha256 = crateInfo.sha256;
       }
+      // lib.optionalAttrs ((crateInfo.build or null) != null) {
+        build = crateInfo.build;
+      }
       // lib.optionalAttrs ((crateInfo.libPath or null) != null) {
         libPath = crateInfo.libPath;
       }

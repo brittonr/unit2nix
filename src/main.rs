@@ -152,6 +152,7 @@ struct NixCrate {
     dependencies: Vec<NixDep>,
     build_dependencies: Vec<NixDep>,
     proc_macro: bool,
+    build: Option<String>,
     lib_path: Option<String>,
     lib_name: Option<String>,
     lib_crate_types: Vec<String>,
@@ -373,26 +374,60 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
         // Look up metadata for extra info
         let meta_pkg = meta_by_id.get(pkg_id);
 
-        // Features from the primary build unit
-        let features = primary.features.clone();
+        // Features: union across all lib-like units for this package.
+        // The same crate can appear multiple times in the unit graph with
+        // different feature sets (e.g., hashbrown: once with no features for
+        // a proc-macro's host dep, once with "default" for a target dep).
+        // Nix builds one derivation per crate, so it needs the superset.
+        let features = {
+            let mut all_features: Vec<String> = Vec::new();
+            for (_, u) in units {
+                if u.mode == "build" && (is_lib_kind(&u.target.kind)
+                    || u.target.kind.contains(&"proc-macro".to_string()))
+                {
+                    for f in &u.features {
+                        if !all_features.contains(f) {
+                            all_features.push(f.clone());
+                        }
+                    }
+                }
+            }
+            all_features.sort();
+            all_features
+        };
 
         // Is this a proc-macro?
         let proc_macro = primary.target.kind.contains(&"proc-macro".to_string());
 
-        // Normal dependencies: from lib/proc-macro unit, excluding self's build script
-        let dependencies: Vec<NixDep> = primary
-            .dependencies
-            .iter()
-            .filter(|dep| {
-                let dep_unit = &unit_graph.units[dep.index];
-                // Skip run-custom-build (self's build script)
-                dep_unit.mode != "run-custom-build"
-            })
-            .map(|dep| NixDep {
-                package_id: unit_pkg_ids[dep.index].to_string(),
-                extern_crate_name: dep.extern_crate_name.clone(),
-            })
-            .collect();
+        // Normal dependencies: union across the primary unit and all lib-like
+        // units for this package. Different feature variants may pull in
+        // different deps; bin-only crates have deps on the bin unit only.
+        let dependencies: Vec<NixDep> = {
+            let mut deps = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            let dep_units = units.iter().filter(|(_, u)| {
+                u.mode == "build"
+                    && (is_lib_kind(&u.target.kind)
+                        || u.target.kind.contains(&"proc-macro".to_string())
+                        || u.target.kind.contains(&"bin".to_string()))
+            });
+            for (_, u) in dep_units {
+                for dep in &u.dependencies {
+                    let dep_unit = &unit_graph.units[dep.index];
+                    if dep_unit.mode == "run-custom-build" {
+                        continue;
+                    }
+                    let key = (unit_pkg_ids[dep.index], &dep.extern_crate_name);
+                    if seen.insert(key) {
+                        deps.push(NixDep {
+                            package_id: unit_pkg_ids[dep.index].to_string(),
+                            extern_crate_name: dep.extern_crate_name.clone(),
+                        });
+                    }
+                }
+            }
+            deps
+        };
 
         // Build dependencies: from custom-build unit
         let build_dependencies: Vec<NixDep> = build_script_unit
@@ -485,6 +520,12 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
 
         let links = meta_pkg.and_then(|m| m.links.clone());
 
+        // Build script path (relative to crate root, None if standard build.rs)
+        let build = build_script_unit.and_then(|(_, bs_unit)| {
+            let rel = make_relative(&bs_unit.target.src_path);
+            if rel == "build.rs" { None } else { Some(rel) }
+        });
+
         crates.insert(
             pkg_id.to_string(),
             NixCrate {
@@ -497,6 +538,7 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
                 dependencies,
                 build_dependencies,
                 proc_macro,
+                build,
                 lib_path,
                 lib_name,
                 lib_crate_types,
