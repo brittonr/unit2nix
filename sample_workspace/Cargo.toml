@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "sample-lib",
+    "sample-macro",
+    "sample-bin",
+    "sample-build-script",
+]
+resolver = "2"

@@ -399,13 +399,32 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
             )
         });
 
+        // Crate root directory (from manifest_path, strip /Cargo.toml)
+        let crate_root = meta_pkg
+            .map(|m| {
+                m.manifest_path
+                    .rsplit_once("/Cargo.toml")
+                    .map(|(dir, _)| dir)
+                    .unwrap_or(&m.manifest_path)
+            })
+            .unwrap_or("");
+
+        // Make an absolute src_path relative to the crate root
+        let make_relative = |abs_path: &str| -> String {
+            abs_path
+                .strip_prefix(crate_root)
+                .and_then(|s| s.strip_prefix('/'))
+                .unwrap_or(abs_path)
+                .to_string()
+        };
+
         // Lib info
         let lib_path = if let Some((_, lu)) = lib_unit {
-            let p = &lu.target.src_path;
-            if p.ends_with("src/lib.rs") {
+            let rel = make_relative(&lu.target.src_path);
+            if rel == "src/lib.rs" {
                 None
             } else {
-                Some(p.clone())
+                Some(rel)
             }
         } else {
             None
@@ -434,7 +453,7 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
                 .iter()
                 .map(|(_, bu)| NixBinTarget {
                     name: bu.target.name.clone(),
-                    path: bu.target.src_path.clone(),
+                    path: make_relative(&bu.target.src_path),
                 })
                 .collect()
         } else {

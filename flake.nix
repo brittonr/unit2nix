@@ -16,14 +16,64 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-      in
-      let
+
         openspec = pkgs.writeShellScriptBin "openspec" ''
           export PATH="${pkgs.nodejs_22}/bin:$PATH"
           exec npx -y @fission-ai/openspec@latest "$@"
         '';
+
+        # Library: build a workspace from unit2nix JSON
+        buildFromUnitGraph =
+          {
+            pkgs ? nixpkgs.legacyPackages.${system},
+            src,
+            resolvedJson,
+            buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
+            defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+          }:
+          import ./lib/build-from-unit-graph.nix {
+            inherit
+              pkgs
+              src
+              resolvedJson
+              buildRustCrateForPkgs
+              defaultCrateOverrides
+              ;
+          };
+
+        # Sample workspace build
+        sampleWorkspace = buildFromUnitGraph {
+          inherit pkgs;
+          src = ./sample_workspace;
+          resolvedJson = ./sample_workspace/build-plan.json;
+        };
       in
       {
+        # Library output
+        lib = {
+          inherit buildFromUnitGraph;
+        };
+
+        # Packages
+        packages = {
+          sample = sampleWorkspace.allWorkspaceMembers;
+          sample-bin =
+            let
+              binPkgId = builtins.head (
+                builtins.filter (
+                  id: (sampleWorkspace.resolved.crates.${id}).crateName == "sample-bin"
+                ) (builtins.attrNames sampleWorkspace.resolved.crates)
+              );
+            in
+            sampleWorkspace.builtCrates.crates.${binPkgId};
+        };
+
+        # Checks
+        checks = {
+          sample-builds = sampleWorkspace.allWorkspaceMembers;
+        };
+
+        # Dev shell
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Rust
