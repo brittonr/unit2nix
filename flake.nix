@@ -145,6 +145,10 @@
             # Git dep prefetching
             nix-prefetch-git
 
+            # Benchmarking
+            hyperfine
+            crate2nix
+
             # OpenSpec CLI
             openspec
 
