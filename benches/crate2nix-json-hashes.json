@@ -1,0 +1,13 @@
+{
+  "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.17": "1lh93xydrdn1g9x547bd05g0d3hra7pd1k4jfd2z1pl1h5hwdv4j",
+  "registry+https://github.com/rust-lang/crates.io-index#memchr@2.8.0": "0y9zzxcqxvdqg6wyag7vc3h0blhdn7hkq164bxyx2vph8zs5ijpq",
+  "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106": "0d09nczyaj67x4ihqr5p7gxbkz38gxhk4asc0k8q23g9n85hzl4g",
+  "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.44": "1r7c7hxl66vz3q9qizgjhy77pdrrypqgk4ghc7260xvvfb7ypci1",
+  "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228": "17mf4hhjxv5m90g42wmlbc61hdhlm6j9hwfkpcnd72rpgzm993ls",
+  "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.228": "1bb7id2xwx8izq50098s5j2sqrrvk31jbbrjqygyan6ask3qbls1",
+  "registry+https://github.com/rust-lang/crates.io-index#serde_derive@1.0.228": "0y8xm7fvmr2kjcd029g9fijpndh8csv5m20g4bd76w8qschg4h6m",
+  "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.149": "11jdx4vilzrjjd1dpgy67x5lgzr0laplz30dhv75lnf5ffa07z43",
+  "registry+https://github.com/rust-lang/crates.io-index#syn@2.0.117": "16cv7c0wbn8amxc54n4w15kxlx5ypdmla8s0gxr2l7bv7s0bhrg6",
+  "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24": "0xfs8y1g7syl2iykji8zk5hgfi5jw819f5zsrbaxmlzwsly33r76",
+  "registry+https://github.com/rust-lang/crates.io-index#zmij@1.0.21": "1amb5i6gz7yjb0dnmz5y669674pqmwbj44p4yfxfv2ncgvk8x15q"
+}

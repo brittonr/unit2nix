@@ -1,0 +1,643 @@
+{
+  "root": null,
+  "workspaceMembers": {
+    "sample-bin": "sample-bin",
+    "sample-build-script": "sample-build-script",
+    "sample-lib": "sample-lib",
+    "sample-macro": "sample-macro"
+  },
+  "crates": {
+    "itoa": {
+      "crateName": "itoa",
+      "version": "1.0.17",
+      "edition": "2021",
+      "sha256": "1lh93xydrdn1g9x547bd05g0d3hra7pd1k4jfd2z1pl1h5hwdv4j",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [],
+      "buildDependencies": [],
+      "features": {
+        "no-panic": [
+          "dep:no-panic"
+        ]
+      },
+      "resolvedDefaultFeatures": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "memchr": {
+      "crateName": "memchr",
+      "version": "2.8.0",
+      "edition": "2021",
+      "sha256": "0y9zzxcqxvdqg6wyag7vc3h0blhdn7hkq164bxyx2vph8zs5ijpq",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [],
+      "buildDependencies": [],
+      "features": {
+        "alloc": [],
+        "core": [
+          "dep:core"
+        ],
+        "default": [
+          "std"
+        ],
+        "libc": [],
+        "logging": [
+          "dep:log"
+        ],
+        "rustc-dep-of-std": [
+          "core"
+        ],
+        "std": [
+          "alloc"
+        ],
+        "use_std": [
+          "std"
+        ]
+      },
+      "resolvedDefaultFeatures": [
+        "alloc",
+        "std"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "Andrew Gallant <jamslam@gmail.com>",
+        "bluss"
+      ]
+    },
+    "proc-macro2": {
+      "crateName": "proc-macro2",
+      "version": "1.0.106",
+      "edition": "2021",
+      "sha256": "0d09nczyaj67x4ihqr5p7gxbkz38gxhk4asc0k8q23g9n85hzl4g",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "unicode-ident",
+          "packageId": "unicode-ident"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "default": [
+          "proc-macro"
+        ],
+        "nightly": [],
+        "proc-macro": [],
+        "span-locations": []
+      },
+      "resolvedDefaultFeatures": [
+        "proc-macro"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>",
+        "Alex Crichton <alex@alexcrichton.com>"
+      ]
+    },
+    "quote": {
+      "crateName": "quote",
+      "version": "1.0.44",
+      "edition": "2021",
+      "sha256": "1r7c7hxl66vz3q9qizgjhy77pdrrypqgk4ghc7260xvvfb7ypci1",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "proc-macro2",
+          "packageId": "proc-macro2"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "default": [
+          "proc-macro"
+        ],
+        "proc-macro": [
+          "proc-macro2/proc-macro"
+        ]
+      },
+      "resolvedDefaultFeatures": [
+        "proc-macro"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "sample-bin": {
+      "crateName": "sample-bin",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "sample-bin"
+      },
+      "dependencies": [
+        {
+          "name": "sample-build-script",
+          "packageId": "sample-build-script"
+        },
+        {
+          "name": "sample-lib",
+          "packageId": "sample-lib"
+        },
+        {
+          "name": "sample-macro",
+          "packageId": "sample-macro"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {},
+      "resolvedDefaultFeatures": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [
+        {
+          "name": "sample-bin",
+          "path": "src/main.rs"
+        }
+      ],
+      "libCrateTypes": [],
+      "links": null,
+      "authors": []
+    },
+    "sample-build-script": {
+      "crateName": "sample-build-script",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "sample-build-script"
+      },
+      "dependencies": [],
+      "buildDependencies": [],
+      "features": {},
+      "resolvedDefaultFeatures": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": []
+    },
+    "sample-lib": {
+      "crateName": "sample-lib",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "sample-lib"
+      },
+      "dependencies": [
+        {
+          "name": "serde",
+          "packageId": "serde"
+        },
+        {
+          "name": "serde_json",
+          "packageId": "serde_json"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "default": [],
+        "serde": [
+          "dep:serde",
+          "dep:serde_json"
+        ]
+      },
+      "resolvedDefaultFeatures": [
+        "default",
+        "serde"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": []
+    },
+    "sample-macro": {
+      "crateName": "sample-macro",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "sample-macro"
+      },
+      "dependencies": [],
+      "buildDependencies": [],
+      "features": {},
+      "resolvedDefaultFeatures": [],
+      "procMacro": true,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [],
+      "links": null,
+      "authors": []
+    },
+    "serde": {
+      "crateName": "serde",
+      "version": "1.0.228",
+      "edition": "2021",
+      "sha256": "17mf4hhjxv5m90g42wmlbc61hdhlm6j9hwfkpcnd72rpgzm993ls",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "serde_core",
+          "packageId": "serde_core"
+        },
+        {
+          "name": "serde_derive",
+          "packageId": "serde_derive"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "alloc": [
+          "serde_core/alloc"
+        ],
+        "default": [
+          "std"
+        ],
+        "derive": [
+          "serde_derive"
+        ],
+        "rc": [
+          "serde_core/rc"
+        ],
+        "serde_derive": [
+          "dep:serde_derive"
+        ],
+        "std": [
+          "serde_core/std"
+        ],
+        "unstable": [
+          "serde_core/unstable"
+        ]
+      },
+      "resolvedDefaultFeatures": [
+        "default",
+        "derive",
+        "serde_derive",
+        "std"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "serde_core": {
+      "crateName": "serde_core",
+      "version": "1.0.228",
+      "edition": "2021",
+      "sha256": "1bb7id2xwx8izq50098s5j2sqrrvk31jbbrjqygyan6ask3qbls1",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "serde_derive",
+          "packageId": "serde_derive",
+          "target": "cfg(any())"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "alloc": [],
+        "default": [
+          "std",
+          "result"
+        ],
+        "rc": [],
+        "result": [],
+        "std": [],
+        "unstable": []
+      },
+      "resolvedDefaultFeatures": [
+        "result",
+        "std"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "serde_derive": {
+      "crateName": "serde_derive",
+      "version": "1.0.228",
+      "edition": "2021",
+      "sha256": "0y8xm7fvmr2kjcd029g9fijpndh8csv5m20g4bd76w8qschg4h6m",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "proc-macro2",
+          "packageId": "proc-macro2"
+        },
+        {
+          "name": "quote",
+          "packageId": "quote"
+        },
+        {
+          "name": "syn",
+          "packageId": "syn"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "default": [],
+        "deserialize_in_place": []
+      },
+      "resolvedDefaultFeatures": [
+        "default"
+      ],
+      "procMacro": true,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [],
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "serde_json": {
+      "crateName": "serde_json",
+      "version": "1.0.149",
+      "edition": "2021",
+      "sha256": "11jdx4vilzrjjd1dpgy67x5lgzr0laplz30dhv75lnf5ffa07z43",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "itoa",
+          "packageId": "itoa"
+        },
+        {
+          "name": "memchr",
+          "packageId": "memchr"
+        },
+        {
+          "name": "serde",
+          "packageId": "serde",
+          "target": "cfg(any())"
+        },
+        {
+          "name": "serde_core",
+          "packageId": "serde_core"
+        },
+        {
+          "name": "zmij",
+          "packageId": "zmij"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "alloc": [
+          "serde_core/alloc"
+        ],
+        "arbitrary_precision": [],
+        "default": [
+          "std"
+        ],
+        "float_roundtrip": [],
+        "indexmap": [
+          "dep:indexmap"
+        ],
+        "preserve_order": [
+          "indexmap",
+          "std"
+        ],
+        "raw_value": [],
+        "std": [
+          "memchr/std",
+          "serde_core/std"
+        ],
+        "unbounded_depth": []
+      },
+      "resolvedDefaultFeatures": [
+        "default",
+        "std"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "syn": {
+      "crateName": "syn",
+      "version": "2.0.117",
+      "edition": "2021",
+      "sha256": "16cv7c0wbn8amxc54n4w15kxlx5ypdmla8s0gxr2l7bv7s0bhrg6",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [
+        {
+          "name": "proc-macro2",
+          "packageId": "proc-macro2"
+        },
+        {
+          "name": "quote",
+          "packageId": "quote"
+        },
+        {
+          "name": "unicode-ident",
+          "packageId": "unicode-ident"
+        }
+      ],
+      "buildDependencies": [],
+      "features": {
+        "clone-impls": [],
+        "default": [
+          "derive",
+          "parsing",
+          "printing",
+          "clone-impls",
+          "proc-macro"
+        ],
+        "derive": [],
+        "extra-traits": [],
+        "fold": [],
+        "full": [],
+        "parsing": [],
+        "printing": [
+          "dep:quote"
+        ],
+        "proc-macro": [
+          "proc-macro2/proc-macro",
+          "quote?/proc-macro"
+        ],
+        "test": [
+          "syn-test-suite/all-features"
+        ],
+        "visit": [],
+        "visit-mut": []
+      },
+      "resolvedDefaultFeatures": [
+        "clone-impls",
+        "derive",
+        "parsing",
+        "printing",
+        "proc-macro"
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "unicode-ident": {
+      "crateName": "unicode-ident",
+      "version": "1.0.24",
+      "edition": "2021",
+      "sha256": "0xfs8y1g7syl2iykji8zk5hgfi5jw819f5zsrbaxmlzwsly33r76",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [],
+      "buildDependencies": [],
+      "features": {},
+      "resolvedDefaultFeatures": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    },
+    "zmij": {
+      "crateName": "zmij",
+      "version": "1.0.21",
+      "edition": "2021",
+      "sha256": "1amb5i6gz7yjb0dnmz5y669674pqmwbj44p4yfxfv2ncgvk8x15q",
+      "source": {
+        "type": "crates-io"
+      },
+      "dependencies": [],
+      "buildDependencies": [],
+      "features": {
+        "no-panic": [
+          "dep:no-panic"
+        ]
+      },
+      "resolvedDefaultFeatures": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "libCrateTypes": [
+        "lib"
+      ],
+      "links": null,
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ]
+    }
+  }
+}

@@ -41,6 +41,14 @@ NIX_UNIT2NIX="
 
 NIX_CRATE2NIX="(import $ROOT/benches/crate2nix-Cargo.nix {}).allWorkspaceMembers"
 
+NIX_CRATE2NIX_JSON="
+  (import $ROOT/benches/crate2nix-build-from-json.nix {
+    pkgs = import <nixpkgs> {};
+    src = $ROOT/sample_workspace;
+    resolvedJson = $ROOT/benches/crate2nix-json.json;
+  }).allWorkspaceMembers
+"
+
 NIX_CRANE="import $ROOT/benches/crane.nix { pkgs = import <nixpkgs> {}; }"
 
 NIX_BRP="import $ROOT/benches/buildRustPackage.nix { pkgs = import <nixpkgs> {}; }"
@@ -74,6 +82,8 @@ hyperfine \
   "nix-instantiate --quiet --expr '$NIX_UNIT2NIX' >/dev/null 2>&1" \
   --command-name "crate2nix (16 per-crate drvs)" \
   "nix-instantiate --quiet --expr '$NIX_CRATE2NIX' >/dev/null 2>&1" \
+  --command-name "crate2nix --format json (15 per-crate drvs)" \
+  "nix-instantiate --quiet --expr '$NIX_CRATE2NIX_JSON' >/dev/null 2>&1" \
   --command-name "crane (2 monolithic drvs)" \
   "nix-instantiate --quiet --expr '($NIX_CRANE).sample-bin' >/dev/null 2>&1" \
   --command-name "buildRustPackage (1 monolithic drv)" \
@@ -91,7 +101,8 @@ for expr in \
   "$NIX_UNIT2NIX" \
   "$NIX_CRATE2NIX" \
   "($NIX_CRANE).sample-bin" \
-  "($NIX_BRP).sample-bin"; do
+  "($NIX_BRP).sample-bin" \
+  "$NIX_CRATE2NIX_JSON"; do
   drv=$(nix-instantiate --quiet --expr "$expr" 2>/dev/null) || true
   [ -n "$drv" ] && nix-store --delete "$drv" 2>/dev/null || true
 done
@@ -101,6 +112,7 @@ echo ""
 for label_expr in \
   "unit2nix:$NIX_UNIT2NIX" \
   "crate2nix:$NIX_CRATE2NIX" \
+  "crate2nix-json:$NIX_CRATE2NIX_JSON" \
   "crane:($NIX_CRANE).sample-bin" \
   "buildRustPackage:($NIX_BRP).sample-bin"; do
   label="${label_expr%%:*}"
@@ -116,9 +128,10 @@ echo ""
 echo "━━━ Incremental rebuild (touch sample-lib, rebuild) ━━━"
 
 # Pre-build everything so caches are warm
-echo "  Pre-building all four..."
+echo "  Pre-building all five..."
 nix-build --no-out-link --expr "$NIX_UNIT2NIX" >/dev/null 2>&1
 nix-build --no-out-link --expr "$NIX_CRATE2NIX" >/dev/null 2>&1
+nix-build --no-out-link --expr "$NIX_CRATE2NIX_JSON" >/dev/null 2>&1
 nix-build --no-out-link --expr "($NIX_CRANE).sample-bin" >/dev/null 2>&1
 nix-build --no-out-link --expr "($NIX_BRP).sample-bin" >/dev/null 2>&1
 
@@ -134,6 +147,13 @@ echo "// touched" >> "$MODIFIED/sample-lib/src/lib.rs"
 C2N_MOD="$TMPDIR/crate2nix-mod.nix"
 crate2nix generate -f "$MODIFIED/Cargo.toml" -o "$C2N_MOD" -h "$TMPDIR/c2n-mod-hashes.json" 2>/dev/null
 
+# Regenerate crate2nix --format json for modified source
+# NOTE: crate2nix json-output makes paths relative to the JSON file's parent,
+# so the JSON must live inside the workspace for paths to resolve correctly.
+C2N_JSON_MOD="$MODIFIED/resolved.json"
+C2N_JSON_BIN=~/.cargo-target/release/crate2nix
+(cd "$MODIFIED" && "$C2N_JSON_BIN" generate --format json -o "$C2N_JSON_MOD" -h "$MODIFIED/c2n-hashes.json" 2>/dev/null)
+
 NIX_U2N_MOD="
   let
     pkgs = import <nixpkgs> {};
@@ -146,6 +166,14 @@ NIX_U2N_MOD="
 "
 
 NIX_C2N_MOD="(import $C2N_MOD {}).allWorkspaceMembers"
+
+NIX_C2N_JSON_MOD="
+  (import $ROOT/benches/crate2nix-build-from-json.nix {
+    pkgs = import <nixpkgs> {};
+    src = $MODIFIED;
+    resolvedJson = $C2N_JSON_MOD;
+  }).allWorkspaceMembers
+"
 
 # Crane/BRP with modified source
 CRANE_MOD="$TMPDIR/crane-mod.nix"
@@ -184,6 +212,8 @@ hyperfine \
   "nix-build --no-out-link --expr '$NIX_U2N_MOD' >/dev/null 2>&1" \
   --command-name "crate2nix (rebuilds: 3 of 16 crates)" \
   "nix-build --no-out-link --expr '$NIX_C2N_MOD' >/dev/null 2>&1" \
+  --command-name "crate2nix --format json (rebuilds: 2 of 15 crates)" \
+  "nix-build --no-out-link --expr '$NIX_C2N_JSON_MOD' >/dev/null 2>&1" \
   --command-name "crane (rebuilds: full workspace)" \
   "nix-build --no-out-link --expr 'import $CRANE_MOD { src = $MODIFIED; }' >/dev/null 2>&1" \
   --command-name "buildRustPackage (rebuilds: full workspace)" \
@@ -196,6 +226,7 @@ echo ""
 echo "━━━ No-op rebuild (everything cached) ━━━"
 nix-build --no-out-link --expr "$NIX_UNIT2NIX" >/dev/null 2>&1
 nix-build --no-out-link --expr "$NIX_CRATE2NIX" >/dev/null 2>&1
+nix-build --no-out-link --expr "$NIX_CRATE2NIX_JSON" >/dev/null 2>&1
 nix-build --no-out-link --expr "($NIX_CRANE).sample-bin" >/dev/null 2>&1
 nix-build --no-out-link --expr "($NIX_BRP).sample-bin" >/dev/null 2>&1
 
@@ -208,6 +239,8 @@ hyperfine \
   "nix-build --no-out-link --expr '$NIX_UNIT2NIX' >/dev/null 2>&1" \
   --command-name "crate2nix (16 cached drvs)" \
   "nix-build --no-out-link --expr '$NIX_CRATE2NIX' >/dev/null 2>&1" \
+  --command-name "crate2nix --format json (15 cached drvs)" \
+  "nix-build --no-out-link --expr '$NIX_CRATE2NIX_JSON' >/dev/null 2>&1" \
   --command-name "crane (2 cached drvs)" \
   "nix-build --no-out-link --expr '($NIX_CRANE).sample-bin' >/dev/null 2>&1" \
   --command-name "buildRustPackage (1 cached drv)" \
@@ -220,21 +253,24 @@ echo ""
 echo "━━━ Derivation graph sizes ━━━"
 U2N_DRV=$(nix-instantiate --quiet --expr "$NIX_UNIT2NIX" 2>/dev/null)
 C2N_DRV=$(nix-instantiate --quiet --expr "$NIX_CRATE2NIX" 2>/dev/null)
+C2N_J_DRV=$(nix-instantiate --quiet --expr "$NIX_CRATE2NIX_JSON" 2>/dev/null)
 CRANE_DRV=$(nix-instantiate --quiet --expr "($NIX_CRANE).sample-bin" 2>/dev/null)
 BRP_DRV=$(nix-instantiate --quiet --expr "($NIX_BRP).sample-bin" 2>/dev/null)
 
 U2N_RUST=$(nix-store -qR "$U2N_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
 C2N_RUST=$(nix-store -qR "$C2N_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
+C2N_J_RUST=$(nix-store -qR "$C2N_J_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
 U2N_TOTAL=$(nix-store -qR "$U2N_DRV" 2>/dev/null | grep -c '\.drv$')
 C2N_TOTAL=$(nix-store -qR "$C2N_DRV" 2>/dev/null | grep -c '\.drv$')
+C2N_J_TOTAL=$(nix-store -qR "$C2N_J_DRV" 2>/dev/null | grep -c '\.drv$')
 CRANE_TOTAL=$(nix-store -qR "$CRANE_DRV" 2>/dev/null | grep -c '\.drv$')
 BRP_TOTAL=$(nix-store -qR "$BRP_DRV" 2>/dev/null | grep -c '\.drv$')
 
 echo ""
-echo "| Metric | unit2nix | crate2nix | crane | buildRustPackage |"
-echo "|--------|----------|-----------|-------|------------------|"
-echo "| Rust crate derivations | $U2N_RUST | $C2N_RUST | 2 (deps + src) | 1 |"
-echo "| Total derivation graph | $U2N_TOTAL | $C2N_TOTAL | $CRANE_TOTAL | $BRP_TOTAL |"
+echo "| Metric | unit2nix | crate2nix | crate2nix --format json | crane | buildRustPackage |"
+echo "|--------|----------|-----------|-------------------------|-------|------------------|"
+echo "| Rust crate derivations | $U2N_RUST | $C2N_RUST | $C2N_J_RUST | 2 (deps + src) | 1 |"
+echo "| Total derivation graph | $U2N_TOTAL | $C2N_TOTAL | $C2N_J_TOTAL | $CRANE_TOTAL | $BRP_TOTAL |"
 
 # ===================================================================
 # SUMMARY
