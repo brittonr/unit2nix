@@ -8,6 +8,7 @@
 
   outputs =
     {
+      self,
       nixpkgs,
       flake-utils,
       ...
@@ -71,6 +72,18 @@
         # Checks
         checks = {
           sample-builds = sampleWorkspace.allWorkspaceMembers;
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          # VM integration tests (Linux only — requires QEMU/KVM)
+          vm-sample-bin = import ./tests/vm/sample-bin.nix {
+            inherit pkgs;
+            sampleBin = self.packages.${system}.sample-bin;
+          };
+          vm-per-crate-caching = import ./tests/vm/per-crate-caching.nix {
+            inherit pkgs sampleWorkspace;
+          };
+          vm-rebuild-isolation = import ./tests/vm/rebuild-isolation.nix {
+            inherit pkgs sampleWorkspace;
+          };
         };
 
         # Dev shell
