@@ -1,0 +1,13 @@
+[package]
+name = "unit2nix"
+version = "0.1.0"
+edition = "2021"
+description = "Generate per-crate Nix build plans from Cargo's unit graph"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
