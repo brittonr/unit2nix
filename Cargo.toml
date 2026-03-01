@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Generate per-crate Nix build plans from Cargo's unit graph"
 license = "MIT"
+repository = "https://github.com/brittonr/unit2nix"
+homepage = "https://github.com/brittonr/unit2nix"
+readme = "README.md"
+keywords = ["nix", "cargo", "build", "crate"]
+categories = ["development-tools::build-utils"]
 
 [dependencies]
 anyhow = "1"
