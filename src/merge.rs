@@ -276,11 +276,19 @@ pub fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock,
             if rel == "build.rs" { None } else { Some(rel) }
         });
 
-        // Package metadata for CARGO_PKG_* env vars
+        // Package metadata for CARGO_PKG_* env vars.
+        // Sanitize strings: buildRustCrate exports these as env vars via bash
+        // using `export CARGO_PKG_DESCRIPTION="..."`, so newlines and embedded
+        // double-quotes break the export. Strip both.
+        let sanitize = |s: String| {
+            s.replace('\n', " ")
+             .replace('\r', " ")
+             .replace('"', "'")
+        };
         let authors = meta_pkg
             .and_then(|m| m.authors.clone())
             .unwrap_or_default();
-        let description = meta_pkg.and_then(|m| m.description.clone());
+        let description = meta_pkg.and_then(|m| m.description.clone()).map(sanitize);
         let homepage = meta_pkg.and_then(|m| m.homepage.clone());
         let license = meta_pkg.and_then(|m| m.license.clone());
         let repository = meta_pkg.and_then(|m| m.repository.clone());
