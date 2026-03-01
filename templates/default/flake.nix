@@ -27,11 +27,21 @@
         src = ./.;
         resolvedJson = ./build-plan.json;
 
-        # Uncomment and add overrides for -sys crates:
+        # Override -sys crates that need native C libraries.
+        # See: https://github.com/brittonr/unit2nix/blob/main/docs/sys-crate-overrides.md
+        #
+        # pkgs.defaultCrateOverrides already handles many common crates.
+        # Add your own below — keys are crate names, values are override functions.
+        #
         # defaultCrateOverrides = pkgs.defaultCrateOverrides // {
         #   openssl-sys = attrs: {
         #     nativeBuildInputs = [ pkgs.pkg-config ];
         #     buildInputs = [ pkgs.openssl.dev ];
+        #   };
+        #   libz-sys = attrs: {
+        #     nativeBuildInputs = [ pkgs.pkg-config ];
+        #     buildInputs = [ pkgs.zlib ];
+        #     LIBZ_SYS_STATIC = "0";
         #   };
         # };
       };

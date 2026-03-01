@@ -119,6 +119,12 @@
         # Checks
         checks = {
           sample-builds = sampleWorkspace.allWorkspaceMembers;
+
+          # Real-world validation: pure Rust workspace (34 crates)
+          validate-ripgrep = import ./tests/ripgrep/build.nix { inherit pkgs; };
+
+          # Real-world validation: workspace with -sys crates (168 crates)
+          validate-bat = import ./tests/bat/build.nix { inherit pkgs; };
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           # VM integration tests (Linux only — requires QEMU/KVM)
           vm-sample-bin = import ./tests/vm/sample-bin.nix {

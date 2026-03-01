@@ -164,7 +164,9 @@ Returns:
 
 ### Crate overrides
 
-For crates with native dependencies (`-sys` crates):
+Crates with native C dependencies (`-sys` crates) need overrides to provide headers and libraries in the Nix sandbox. See [docs/sys-crate-overrides.md](docs/sys-crate-overrides.md) for a full guide with recipes for common crates.
+
+Quick example:
 
 ```nix
 buildFromUnitGraph {
@@ -175,11 +177,10 @@ buildFromUnitGraph {
       nativeBuildInputs = [ pkgs.pkg-config ];
       buildInputs = [ pkgs.openssl.dev ];
     };
-    prost-build = attrs: {
-      nativeBuildInputs = [ pkgs.protobuf ];
-    };
-    my-crate = attrs: {
-      SOME_ENV_VAR = "value";
+    libz-sys = attrs: {
+      nativeBuildInputs = [ pkgs.pkg-config ];
+      buildInputs = [ pkgs.zlib ];
+      LIBZ_SYS_STATIC = "0";
     };
   };
 }
@@ -225,13 +226,14 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 |---------|--------|-------|
 | sample_workspace | 15 | lib, bin, proc-macro, build-script |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | 34 | 9 workspace members, zero overrides needed |
+| [bat](https://github.com/sharkdp/bat) | 168 | -sys crates (libgit2-sys, libz-sys), custom build script |
 | Private 457-crate workspace | 457 | Full production build |
 
 ## Testing
 
 ```bash
-cargo test              # 14 unit tests
-nix flake check         # 4 checks: sample build + 3 NixOS VM tests
+cargo test              # 19 unit tests
+nix flake check         # 7 checks: sample build + bat/ripgrep validation + 3 NixOS VM tests
 ```
 
 ## Requirements
