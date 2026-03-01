@@ -5,7 +5,8 @@
 #
 # Local sources are filtered to exclude target/, .git/, and editor temp files.
 # crates-io sources use fetchurl with SHA256 from Cargo.lock.
-# Git sources use builtins.fetchGit with a pinned rev.
+# Git sources use pkgs.fetchgit with a prefetched SHA256 (pure evaluation).
+# Falls back to builtins.fetchGit if no SHA256 is available (requires --impure).
 
 { pkgs, src }:
 
@@ -53,10 +54,22 @@ else if sourceType == "registry" then
 
 else if sourceType == "git" then
   let
-    repo = builtins.fetchGit {
-      url = source.url;
-      rev = source.rev;
-    };
+    sha256 = source.sha256 or null;
+    # Prefer pkgs.fetchgit with a prefetched hash (pure, fixed-output derivation).
+    # Fall back to builtins.fetchGit when no hash is available (requires --impure).
+    repo =
+      if sha256 != null then
+        pkgs.fetchgit {
+          url = source.url;
+          rev = source.rev;
+          inherit sha256;
+          fetchSubmodules = true;
+        }
+      else
+        builtins.fetchGit {
+          url = source.url;
+          rev = source.rev;
+        };
     subDir = source.subDir or null;
   in
   if subDir != null then repo + "/${subDir}" else repo

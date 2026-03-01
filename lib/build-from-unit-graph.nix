@@ -60,8 +60,8 @@ let
     let
       crateInfo = resolved.crates.${packageId};
 
-      # Resolve a dependency to its derivation.
-      # Proc-macro deps must be built for the host platform.
+      # Resolve a normal dependency to its derivation.
+      # Proc-macro deps must be built for the build platform (they run at compile time).
       depDrv =
         dep:
         let
@@ -73,8 +73,12 @@ let
         else
           self.crates.${dep.packageId};
 
+      # Build dependencies always run on the build platform (they're compiled
+      # into the build script which executes at build time, not on the target).
+      buildDepDrv = dep: self.build.crates.${dep.packageId};
+
       dependencies = map depDrv (crateInfo.dependencies or [ ]);
-      buildDependencies = map depDrv (crateInfo.buildDependencies or [ ]);
+      buildDependencies = map buildDepDrv (crateInfo.buildDependencies or [ ]);
 
       # Compute crate renames: when externCrateName differs from the dep's crateName
       allDeps = (crateInfo.dependencies or [ ]) ++ (crateInfo.buildDependencies or [ ]);
@@ -131,6 +135,19 @@ let
       }
       // lib.optionalAttrs ((crateInfo.libCrateTypes or [ ]) != [ ]) {
         type = crateInfo.libCrateTypes;
+      }
+      # Package metadata for CARGO_PKG_* env vars in build scripts
+      // lib.optionalAttrs ((crateInfo.description or null) != null) {
+        description = crateInfo.description;
+      }
+      // lib.optionalAttrs ((crateInfo.homepage or null) != null) {
+        homepage = crateInfo.homepage;
+      }
+      // lib.optionalAttrs ((crateInfo.license or null) != null) {
+        license = crateInfo.license;
+      }
+      // lib.optionalAttrs ((crateInfo.repository or null) != null) {
+        repository = crateInfo.repository;
       }
     );
 

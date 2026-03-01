@@ -22,12 +22,14 @@ cargo build --unit-graph ─┐
                           │
 cargo metadata ───────────┼─→ unit2nix (Rust) ─→ build-plan.json
                           │
-Cargo.lock checksums ─────┘
+Cargo.lock checksums ─────┤
+                          │
+nix-prefetch-git ─────────┘   (git deps only)
 
 build-plan.json ─→ build-from-unit-graph.nix ─→ 457 buildRustCrate derivations
 ```
 
-Cargo does all dependency resolution, feature expansion, and platform filtering. unit2nix merges three Cargo outputs into one JSON. The Nix consumer is a thin wrapper — no `cfg()` evaluator, no feature resolver.
+Cargo does all dependency resolution, feature expansion, and platform filtering. unit2nix merges three Cargo outputs into one JSON. Git dependencies are prefetched at generation time so the Nix consumer can use fixed-output derivations — no `--impure` needed. The Nix consumer is a thin wrapper — no `cfg()` evaluator, no feature resolver.
 
 ## Quickstart
 
@@ -173,7 +175,7 @@ in buildFromUnitGraph {
 |---|---------|-----------|
 | **Resolver** | Cargo (unit graph) | Reimplemented in Rust |
 | **Platform filtering** | Done by Cargo | 144-line `cfg()` evaluator in Nix |
-| **SHA256 hashes** | From Cargo.lock (no network) | `nix-prefetch-url` per crate |
+| **SHA256 hashes** | Cargo.lock + `nix-prefetch-git` for git deps | `nix-prefetch-url` per crate |
 | **Rust code** | 860 lines | 4,661 lines |
 | **Nix code** | 230 lines | 274 lines |
 | **Stability** | Nightly (`--unit-graph`) | Stable (`cargo metadata`) |
@@ -184,7 +186,7 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 ## Testing
 
 ```bash
-cargo test              # 11 unit tests
+cargo test              # 12 unit tests
 nix flake check         # 4 checks: sample build + 3 NixOS VM tests
 ```
 
@@ -192,6 +194,7 @@ nix flake check         # 4 checks: sample build + 3 NixOS VM tests
 
 - **Nightly Rust** — `cargo build --unit-graph` requires `-Z unstable-options`
 - **Nix** with flakes enabled
+- **nix-prefetch-git** — for prefetching git dependency hashes (bundled when installed via flake)
 
 ## Repository structure
 

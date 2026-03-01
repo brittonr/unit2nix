@@ -202,6 +202,11 @@ enum NixSource {
         /// Only present when the crate isn't at the repo root.
         #[serde(skip_serializing_if = "Option::is_none")]
         sub_dir: Option<String>,
+        /// SHA256 hash from nix-prefetch-git. When present, the Nix consumer
+        /// uses `pkgs.fetchgit` (a fixed-output derivation) for pure evaluation.
+        /// When absent, falls back to `builtins.fetchGit` (requires --impure).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sha256: Option<String>,
     },
 }
 
@@ -332,7 +337,7 @@ fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str)
             // We want sub_dir = "crates/foo"
             let sub_dir = compute_git_subdir(manifest_path);
 
-            Some(NixSource::Git { url, rev, sub_dir })
+            Some(NixSource::Git { url, rev, sub_dir, sha256: None })
         }
         _ => None,
     }
@@ -395,11 +400,83 @@ fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
             url,
             rev: rev.to_string(),
             sub_dir: None,
+            sha256: None,
         })
     } else {
         // path+ or unknown — local
         None
     }
+}
+
+// ---------------------------------------------------------------------------
+// Git prefetching
+// ---------------------------------------------------------------------------
+
+/// Prefetch result from `nix-prefetch-git`.
+#[derive(Debug, Deserialize)]
+struct PrefetchGitResult {
+    sha256: String,
+}
+
+/// Run `nix-prefetch-git` to get the SHA256 of a git checkout.
+///
+/// This produces a fixed-output hash that `pkgs.fetchgit` can use,
+/// enabling pure flake evaluation without `--impure`.
+fn prefetch_git(url: &str, rev: &str) -> Result<String> {
+    let output = Command::new("nix-prefetch-git")
+        .args(["--url", url, "--rev", rev, "--fetch-submodules", "--quiet"])
+        .output()
+        .context("failed to run nix-prefetch-git (is it installed?)")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("nix-prefetch-git failed for {url} at {rev}:\n{stderr}");
+    }
+
+    let result: PrefetchGitResult = serde_json::from_slice(&output.stdout)
+        .context("failed to parse nix-prefetch-git JSON output")?;
+
+    Ok(result.sha256)
+}
+
+/// Prefetch all git sources in the build plan, filling in their sha256 fields.
+///
+/// Deduplicates by (url, rev) so each git repo is fetched at most once,
+/// even if multiple crates come from the same repo (monorepo deps).
+fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
+    // Collect unique (url, rev) pairs that need prefetching
+    let mut to_prefetch: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for (pkg_id, crate_info) in &plan.crates {
+        if let Some(NixSource::Git { url, rev, sha256: None, .. }) = &crate_info.source {
+            to_prefetch
+                .entry((url.clone(), rev.clone()))
+                .or_default()
+                .push(pkg_id.clone());
+        }
+    }
+
+    if to_prefetch.is_empty() {
+        return Ok(());
+    }
+
+    let total = to_prefetch.len();
+    eprintln!("Prefetching {total} git source(s)...");
+
+    for (idx, ((url, rev), pkg_ids)) in to_prefetch.iter().enumerate() {
+        let short_rev = if rev.len() > 12 { &rev[..12] } else { rev };
+        eprintln!("  [{}/{}] {} @ {}", idx + 1, total, url, short_rev);
+
+        let sha256 = prefetch_git(url, rev)?;
+
+        // Apply the hash to all crates from this repo
+        for pkg_id in pkg_ids {
+            if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut plan.crates.get_mut(pkg_id).unwrap().source {
+                *hash = Some(sha256.clone());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Returns true if the target kind represents a library (lib, rlib, cdylib, etc).
@@ -777,12 +854,15 @@ fn main() -> Result<()> {
     );
 
     eprintln!("Merging...");
-    let plan = merge(&unit_graph, &metadata, &lock, cli.target.as_deref())?;
+    let mut plan = merge(&unit_graph, &metadata, &lock, cli.target.as_deref())?;
     eprintln!("  {} crates in build plan", plan.crates.len());
     eprintln!("  {} workspace members", plan.workspace_members.len());
     if let Some(ref t) = plan.target {
         eprintln!("  target: {t}");
     }
+
+    // Prefetch git sources for pure flake evaluation
+    prefetch_git_sources(&mut plan)?;
 
     let json = serde_json::to_string_pretty(&plan)?;
 
@@ -876,10 +956,11 @@ mod tests {
             "",
         );
         match source {
-            Some(NixSource::Git { url, rev, sub_dir }) => {
+            Some(NixSource::Git { url, rev, sub_dir, sha256 }) => {
                 assert_eq!(url, "https://github.com/example/repo.git");
                 assert_eq!(rev, "abc123def456");
                 assert_eq!(sub_dir, None, "root-level crate should have no sub_dir");
+                assert_eq!(sha256, None, "sha256 is filled later by prefetch");
             }
             other => panic!("expected Git, got {other:?}"),
         }
@@ -893,10 +974,11 @@ mod tests {
             "",
         );
         match source {
-            Some(NixSource::Git { url, rev, sub_dir }) => {
+            Some(NixSource::Git { url, rev, sub_dir, sha256 }) => {
                 assert_eq!(url, "https://github.com/org/monorepo.git");
                 assert_eq!(rev, "abc123def456");
                 assert_eq!(sub_dir, Some("crates/my-crate".to_string()));
+                assert_eq!(sha256, None, "sha256 is filled later by prefetch");
             }
             other => panic!("expected Git with sub_dir, got {other:?}"),
         }

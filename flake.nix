@@ -43,30 +43,47 @@
           };
 
         # The unit2nix binary itself
-        unit2nix = pkgs.rustPlatform.buildRustPackage {
-          pname = "unit2nix";
-          version = "0.1.0";
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter =
-              path: type:
-              let
-                baseName = builtins.baseNameOf path;
-              in
-              (pkgs.lib.cleanSourceFilter path type)
-              && baseName != "target"
-              && baseName != "sample_workspace"
-              && baseName != "tests"
-              && baseName != "openspec"
-              && baseName != "result";
+        unit2nix =
+          let
+            unwrapped = pkgs.rustPlatform.buildRustPackage {
+              pname = "unit2nix";
+              version = "0.1.0";
+              src = pkgs.lib.cleanSourceWith {
+                src = ./.;
+                filter =
+                  path: type:
+                  let
+                    baseName = builtins.baseNameOf path;
+                  in
+                  (pkgs.lib.cleanSourceFilter path type)
+                  && baseName != "target"
+                  && baseName != "sample_workspace"
+                  && baseName != "tests"
+                  && baseName != "openspec"
+                  && baseName != "result";
+              };
+              cargoLock.lockFile = ./Cargo.lock;
+              meta = {
+                description = "Per-crate Nix build plans from Cargo's unit graph";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "unit2nix";
+              };
+            };
+          in
+          # Wrap the binary so nix-prefetch-git is available for git dep prefetching
+          pkgs.symlinkJoin {
+            name = "unit2nix-${unwrapped.version}";
+            paths = [ unwrapped ];
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            postBuild = ''
+              wrapProgram $out/bin/unit2nix \
+                --suffix PATH : ${pkgs.lib.makeBinPath [
+                  pkgs.nix-prefetch-git
+                  pkgs.nix
+                ]}
+            '';
+            inherit (unwrapped) meta version;
           };
-          cargoLock.lockFile = ./Cargo.lock;
-          meta = {
-            description = "Per-crate Nix build plans from Cargo's unit graph";
-            license = pkgs.lib.licenses.mit;
-            mainProgram = "unit2nix";
-          };
-        };
 
         # Sample workspace build
         sampleWorkspace = buildFromUnitGraph {
@@ -115,11 +132,14 @@
             clippy
             rustfmt
 
+            # Git dep prefetching
+            nix-prefetch-git
+
             # OpenSpec CLI
             openspec
 
             # Nix tools
-            nixfmt-rfc-style
+            nixfmt
           ];
 
           shellHook = ''
