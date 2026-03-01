@@ -4,6 +4,7 @@ use serde::Deserialize;
 // Cargo metadata types (from `cargo metadata --format-version=1`)
 // ---------------------------------------------------------------------------
 
+/// Deserialized output of `cargo metadata --format-version=1`.
 #[derive(Debug, Deserialize)]
 pub struct CargoMetadata {
     pub packages: Vec<MetadataPackage>,
@@ -11,6 +12,10 @@ pub struct CargoMetadata {
     pub workspace_members: Vec<String>,
 }
 
+/// A package entry from cargo metadata.
+///
+/// Contains source info, manifest path, and optional metadata fields
+/// used for `CARGO_PKG_*` environment variables in build scripts.
 #[derive(Debug, Deserialize)]
 pub struct MetadataPackage {
     pub id: String,
@@ -28,11 +33,13 @@ pub struct MetadataPackage {
 // Cargo.lock types
 // ---------------------------------------------------------------------------
 
+/// Deserialized Cargo.lock file (TOML format).
 #[derive(Debug, Deserialize)]
 pub struct CargoLock {
     pub package: Option<Vec<LockPackage>>,
 }
 
+/// A package entry from Cargo.lock, providing checksums for registry crates.
 #[derive(Debug, Deserialize)]
 pub struct LockPackage {
     pub name: String,

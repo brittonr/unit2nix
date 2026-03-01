@@ -1,20 +1,35 @@
 use crate::output::NixSource;
 
-/// Parse a `git+URL?query#fragment` string into `(url, rev)`.
+/// Parsed components of a `git+URL?query#fragment` string.
+struct ParsedGitUrl {
+    /// Base URL (everything before `?` or `#`).
+    url: String,
+    /// Value of the `?rev=` query parameter, if present.
+    rev_query: Option<String>,
+    /// The fragment after `#` (commit hash in source strings, `name@version` in pkg_ids).
+    fragment: String,
+}
+
+/// Parse a `git+URL?query#fragment` string into its components.
 ///
-/// Handles two fragment formats:
-/// - `git+URL#HASH` — the fragment is the commit rev
-/// - `git+URL#name@version` — strip the `name@` prefix to get the rev
-fn parse_git_url(s: &str) -> Option<(String, String)> {
+/// The interpretation of the fragment depends on context:
+/// - In metadata source strings (`parse_source`): the fragment is the full commit hash.
+/// - In package IDs (`infer_source_from_pkg_id`): the fragment is `name@version`.
+fn parse_git_url(s: &str) -> Option<ParsedGitUrl> {
     let without_prefix = s.strip_prefix("git+")?;
     let (url_part, fragment) = without_prefix.rsplit_once('#')?;
-    // Fragment may be a bare rev hash or "name@version" — strip the name@ prefix
-    let rev = fragment
-        .rsplit_once('@')
-        .map(|(_, v)| v)
-        .unwrap_or(fragment);
-    let url = url_part.split('?').next().unwrap_or(url_part);
-    Some((url.to_string(), rev.to_string()))
+    let (base_url, query) = url_part.split_once('?').unwrap_or((url_part, ""));
+
+    let rev_query = query
+        .split('&')
+        .find_map(|param| param.strip_prefix("rev="))
+        .map(|v| v.to_string());
+
+    Some(ParsedGitUrl {
+        url: base_url.to_string(),
+        rev_query,
+        fragment: fragment.to_string(),
+    })
 }
 
 /// Parse source string from cargo metadata into a NixSource.
@@ -28,7 +43,7 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             // Local path dependency — compute relative path from workspace root
             let manifest = std::path::Path::new(manifest_path);
             let crate_dir = manifest.parent().unwrap_or(std::path::Path::new("."));
-            let crate_dir_str = crate_dir.to_string_lossy().to_string();
+            let crate_dir_str = crate_dir.to_string_lossy().into_owned();
             let ws = workspace_root.trim_end_matches('/');
             let rel = crate_dir_str
                 .strip_prefix(ws)
@@ -51,15 +66,16 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             }
         }
         Some(s) if s.starts_with("git+") => {
-            let (url, rev) = parse_git_url(s)?;
+            let parsed = parse_git_url(s)?;
+            // In metadata source strings, the fragment is always the full commit hash.
+            let rev = parsed.fragment;
             let sub_dir = compute_git_subdir(manifest_path);
-            Some(NixSource::Git { url, rev, sub_dir, sha256: None })
+            Some(NixSource::Git { url: parsed.url, rev, sub_dir, sha256: None })
         }
         Some(s) => {
             eprintln!("warning: unknown source type, treating as local: {s}");
             None
         }
-        // None handled above
     }
 }
 
@@ -100,7 +116,8 @@ pub fn compute_git_subdir(manifest_path: &str) -> Option<String> {
 /// resolver doesn't include). The pkg_id format encodes the source:
 /// - `registry+https://...#name@version` → crates.io or alternative registry
 /// - `path+file:///...#version` → local
-/// - `git+https://...#name@version` or `git+https://...#hash` → git
+/// - `git+https://...?rev=HASH#name@version` → git (rev from query param)
+/// - `git+https://...#HASH` → git (rev from fragment)
 pub fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
     if pkg_id.starts_with("registry+https://github.com/rust-lang/crates.io-index") {
         Some(NixSource::CratesIo)
@@ -113,9 +130,24 @@ pub fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
             index: registry_url.to_string(),
         })
     } else if pkg_id.starts_with("git+") {
-        let (url, rev) = parse_git_url(pkg_id)?;
+        let parsed = parse_git_url(pkg_id)?;
+        // In pkg_ids, the fragment is `name@version` (NOT a git rev).
+        // The actual rev comes from the `?rev=` query parameter.
+        // Fall back to the fragment only if it looks like a bare hash (no `@`).
+        let rev = if let Some(rev) = parsed.rev_query {
+            rev
+        } else if !parsed.fragment.contains('@') {
+            // Fragment is a bare commit hash (no name@ prefix)
+            parsed.fragment
+        } else {
+            eprintln!(
+                "warning: git dep has no ?rev= and fragment is name@version, \
+                 cannot determine rev: {pkg_id}"
+            );
+            return None;
+        };
         Some(NixSource::Git {
-            url,
+            url: parsed.url,
             rev,
             sub_dir: None,
             sha256: None,
@@ -129,7 +161,6 @@ pub fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::output::NixSource;
 
     #[test]
     fn parse_source_crates_io() {
@@ -184,7 +215,7 @@ mod tests {
         match source {
             Some(NixSource::Git { url, rev, sub_dir, sha256 }) => {
                 assert_eq!(url, "https://github.com/example/repo.git");
-                assert_eq!(rev, "abc123def456");
+                assert_eq!(rev, "abc123def456", "should use fragment (full hash) as rev");
                 assert_eq!(sub_dir, None, "root-level crate should have no sub_dir");
                 assert_eq!(sha256, None, "sha256 is filled later by prefetch");
             }
@@ -235,16 +266,16 @@ mod tests {
     }
 
     #[test]
-    fn infer_git_with_name_at_version() {
-        // pkg_id format: git+URL#name@version — should extract version as rev
-        // (this was a bug: previously returned "my-crate@0.5.0" as rev)
+    fn infer_git_with_rev_query_param() {
+        // pkg_id format: git+URL?rev=HASH#name@version
+        // The rev should come from ?rev=, NOT the fragment's version.
         let source = infer_source_from_pkg_id(
-            "git+https://github.com/example/repo.git?rev=abc123#my-crate@0.5.0",
+            "git+https://github.com/example/repo.git?rev=abc123def456#my-crate@0.5.0",
         );
         match source {
             Some(NixSource::Git { url, rev, .. }) => {
                 assert_eq!(url, "https://github.com/example/repo.git");
-                assert_eq!(rev, "0.5.0", "should strip name@ prefix from fragment");
+                assert_eq!(rev, "abc123def456", "should use ?rev= query param, not fragment version");
             }
             other => panic!("expected Git, got {other:?}"),
         }
@@ -252,6 +283,7 @@ mod tests {
 
     #[test]
     fn infer_git_with_bare_hash() {
+        // When fragment is a bare hash (no @), use it directly
         let source = infer_source_from_pkg_id(
             "git+https://github.com/example/repo.git#abc123def456",
         );
@@ -262,5 +294,14 @@ mod tests {
             }
             other => panic!("expected Git, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn infer_git_no_rev_with_name_at_version() {
+        // If no ?rev= and fragment is name@version, we can't determine the rev
+        let source = infer_source_from_pkg_id(
+            "git+https://github.com/example/repo.git#my-crate@0.5.0",
+        );
+        assert!(source.is_none(), "should return None when rev cannot be determined");
     }
 }

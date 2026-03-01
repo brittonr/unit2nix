@@ -7,7 +7,7 @@ mod prefetch;
 mod source;
 mod unit_graph;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 use cli::Cli;
@@ -52,8 +52,9 @@ fn main() -> Result<()> {
 
     match &cli.output {
         Some(path) => {
-            std::fs::write(path, &json)?;
-            eprintln!("Wrote {path}");
+            std::fs::write(path, &json)
+                .with_context(|| format!("failed to write output to {}", path.display()))?;
+            eprintln!("Wrote {}", path.display());
         }
         None => println!("{json}"),
     }

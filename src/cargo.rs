@@ -9,8 +9,8 @@ use crate::unit_graph::UnitGraph;
 use crate::metadata::{CargoMetadata, CargoLock};
 
 /// Resolve the Cargo.lock path from a manifest path.
-fn cargo_lock_path(manifest_path: &str) -> PathBuf {
-    Path::new(manifest_path)
+fn cargo_lock_path(manifest_path: &Path) -> PathBuf {
+    manifest_path
         .parent()
         .unwrap_or(Path::new("."))
         .join("Cargo.lock")
@@ -21,14 +21,14 @@ fn cargo_lock_path(manifest_path: &str) -> PathBuf {
 /// Creates a `Command::new("cargo")` with the given args plus
 /// `--manifest-path`, runs it, checks the exit status, and returns
 /// stdout bytes on success or bails with stderr on failure.
-pub fn run_cargo(args: &[&str], manifest_path: &str, description: &str) -> Result<Vec<u8>> {
+pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Result<Vec<u8>> {
     let mut cmd = Command::new("cargo");
     cmd.args(args);
-    cmd.args(["--manifest-path", manifest_path]);
+    cmd.arg("--manifest-path").arg(manifest_path);
 
     let output = cmd.output()
         .with_context(|| format!("failed to run {}", description))?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -84,7 +84,7 @@ pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
 }
 
 /// Read and parse the Cargo.lock file.
-pub fn read_cargo_lock(manifest_path: &str) -> Result<CargoLock> {
+pub fn read_cargo_lock(manifest_path: &Path) -> Result<CargoLock> {
     let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read_to_string(&lock_path)
         .with_context(|| format!("failed to read {}", lock_path.display()))?;
@@ -96,7 +96,7 @@ pub fn read_cargo_lock(manifest_path: &str) -> Result<CargoLock> {
 /// Returns a hex-encoded hash string. The Nix consumer compares this
 /// against `builtins.hashFile "sha256"` of the workspace's Cargo.lock
 /// to detect stale build plans.
-pub fn hash_cargo_lock(manifest_path: &str) -> Result<String> {
+pub fn hash_cargo_lock(manifest_path: &Path) -> Result<String> {
     let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read(&lock_path)
         .with_context(|| format!("failed to read {} for hashing", lock_path.display()))?;
@@ -107,11 +107,12 @@ pub fn hash_cargo_lock(manifest_path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::hash_cargo_lock;
+    use std::path::Path;
 
     #[test]
     fn cargo_lock_hash_is_sha256_hex() {
         // Hash our own Cargo.lock as a smoke test
-        let hash = hash_cargo_lock("./Cargo.toml").expect("should hash Cargo.lock");
+        let hash = hash_cargo_lock(Path::new("./Cargo.toml")).expect("should hash Cargo.lock");
         assert_eq!(hash.len(), 64, "SHA256 hex should be 64 chars, got: {hash}");
         assert!(
             hash.chars().all(|c| c.is_ascii_hexdigit()),
@@ -121,8 +122,8 @@ mod tests {
 
     #[test]
     fn cargo_lock_hash_is_deterministic() {
-        let h1 = hash_cargo_lock("./Cargo.toml").unwrap();
-        let h2 = hash_cargo_lock("./Cargo.toml").unwrap();
+        let h1 = hash_cargo_lock(Path::new("./Cargo.toml")).unwrap();
+        let h2 = hash_cargo_lock(Path::new("./Cargo.toml")).unwrap();
         assert_eq!(h1, h2, "same file should produce same hash");
     }
 }

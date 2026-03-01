@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 /// Generate per-crate Nix build plans from Cargo's unit graph.
@@ -10,7 +12,7 @@ use clap::Parser;
 pub struct Cli {
     /// Path to the Cargo.toml (default: ./Cargo.toml)
     #[arg(long, default_value = "./Cargo.toml")]
-    pub manifest_path: String,
+    pub manifest_path: PathBuf,
 
     /// Features to enable (comma-separated)
     #[arg(long)]
@@ -38,5 +40,5 @@ pub struct Cli {
 
     /// Output file (default: stdout)
     #[arg(short, long)]
-    pub output: Option<String>,
+    pub output: Option<PathBuf>,
 }

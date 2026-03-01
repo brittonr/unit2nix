@@ -1,6 +1,14 @@
 use std::collections::BTreeMap;
 use serde::Serialize;
 
+/// Schema version for the build plan JSON output.
+pub const BUILD_PLAN_VERSION: u32 = 1;
+
+/// Top-level build plan consumed by `build-from-unit-graph.nix`.
+///
+/// Contains every crate in the dependency graph with its resolved features,
+/// dependencies, source info, and metadata. The Nix consumer walks this
+/// to build each crate individually with `buildRustCrate`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixBuildPlan {
@@ -18,6 +26,7 @@ pub struct NixBuildPlan {
     pub crates: BTreeMap<String, NixCrate>,
 }
 
+/// A single crate in the build plan, with everything needed to build it.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixCrate {
@@ -49,16 +58,20 @@ pub struct NixCrate {
     pub repository: Option<String>,
 }
 
+/// Where a crate's source comes from.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum NixSource {
+    /// The default crates.io registry.
     CratesIo,
-    /// Non-crates.io registry (e.g. corporate Artifactory).
+    /// A non-crates.io registry (e.g. corporate Artifactory).
     Registry {
         /// Registry index URL.
         index: String,
     },
+    /// A local path dependency within the workspace.
     Local { path: String },
+    /// A git dependency.
     Git {
         url: String,
         rev: String,
@@ -74,6 +87,7 @@ pub enum NixSource {
     },
 }
 
+/// A dependency reference in the build plan.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixDep {
@@ -81,6 +95,7 @@ pub struct NixDep {
     pub extern_crate_name: String,
 }
 
+/// A binary target within a crate.
 #[derive(Debug, Serialize)]
 pub struct NixBinTarget {
     pub name: String,
