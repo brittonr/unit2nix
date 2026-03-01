@@ -69,9 +69,19 @@ Changes made:
 - **Tests**: Added 3 new tests (infer_git_with_rev_query_param, infer_git_with_bare_hash, infer_git_no_rev_with_name_at_version)
 - **Verification**: `cargo test` 17/17 pass, `cargo clippy` 0 warnings, `nix build` + `nix flake check` all pass
 
+## Session: 2026-03-01 #3 — Error handling, bat validation, archive
+Changes made:
+- **Error handling**: `parse_source` now returns `Result<Option<NixSource>>` — unknown/malformed sources produce `Err` instead of silent `None`
+- **Error handling**: merge.rs catches Err from parse_source, logs warning, falls back to pkg_id inference
+- **Error handling**: fetch-source.nix unknown source type fallback changed from silent `src` to `builtins.throw` with clear error
+- **Tests**: Added `parse_source_unknown_type_errors` and `parse_source_malformed_git_errors` tests
+- **Validation**: bat (168 crates) builds successfully with -sys crate overrides (libgit2-sys, libz-sys)
+- **Archive**: Moved completed OpenSpec changes to archive/
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix
 - benches/ has comparison benchmarks vs crate2nix, crane, buildRustPackage
 - tests/vm/ has NixOS VM integration tests
-- tests/ripgrep/ validates against real-world 34-crate workspace
+- tests/ripgrep/ validates against real-world 34-crate workspace (pure Rust)
+- tests/bat/ validates against 168-crate workspace with -sys crates (libgit2-sys, libz-sys)

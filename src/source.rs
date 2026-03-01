@@ -1,3 +1,5 @@
+use anyhow::{bail, Result};
+
 use crate::output::NixSource;
 
 /// Parsed components of a `git+URL?query#fragment` string.
@@ -37,7 +39,13 @@ fn parse_git_url(s: &str) -> Option<ParsedGitUrl> {
 /// For git dependencies, computes `sub_dir` from the manifest_path relative
 /// to Cargo's git checkout cache. This handles monorepo git deps where the
 /// crate lives in a subdirectory (e.g., `{ git = "...", subdirectory = "crates/foo" }`).
-pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str) -> Option<NixSource> {
+/// Returns:
+/// - `Ok(Some(...))` — known source type resolved successfully.
+/// - `Ok(None)` — source field is `None` in metadata but manifest_path is empty
+///   (shouldn't happen in practice; local deps always have a manifest_path).
+/// - `Err(...)` — unknown or malformed source type. Callers should fall back to
+///   `infer_source_from_pkg_id` or propagate the error.
+pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str) -> Result<Option<NixSource>> {
     match source {
         None => {
             // Local path dependency — compute relative path from workspace root
@@ -50,31 +58,31 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
                 .map(|s| s.strip_prefix('/').unwrap_or(s))
                 .unwrap_or(&crate_dir_str);
             let path = if rel.is_empty() { "." } else { rel };
-            Some(NixSource::Local {
+            Ok(Some(NixSource::Local {
                 path: path.to_string(),
-            })
+            }))
         }
         Some(s) if s.starts_with("registry+") => {
             // Extract registry URL for non-crates.io registries
             let registry_url = s.strip_prefix("registry+").unwrap_or("");
             if registry_url == "https://github.com/rust-lang/crates.io-index" {
-                Some(NixSource::CratesIo)
+                Ok(Some(NixSource::CratesIo))
             } else {
-                Some(NixSource::Registry {
+                Ok(Some(NixSource::Registry {
                     index: registry_url.to_string(),
-                })
+                }))
             }
         }
         Some(s) if s.starts_with("git+") => {
-            let parsed = parse_git_url(s)?;
+            let parsed = parse_git_url(s)
+                .ok_or_else(|| anyhow::anyhow!("malformed git source URL: {s}"))?;
             // In metadata source strings, the fragment is always the full commit hash.
             let rev = parsed.fragment;
             let sub_dir = compute_git_subdir(manifest_path);
-            Some(NixSource::Git { url: parsed.url, rev, sub_dir, sha256: None })
+            Ok(Some(NixSource::Git { url: parsed.url, rev, sub_dir, sha256: None }))
         }
         Some(s) => {
-            eprintln!("warning: unknown source type, treating as local: {s}");
-            None
+            bail!("unknown source type: {s}")
         }
     }
 }
@@ -168,7 +176,7 @@ mod tests {
             Some("registry+https://github.com/rust-lang/crates.io-index"),
             "",
             "",
-        );
+        ).unwrap();
         assert!(matches!(source, Some(NixSource::CratesIo)));
     }
 
@@ -178,7 +186,7 @@ mod tests {
             Some("registry+https://dl.cloudsmith.io/public/my-org/my-repo/cargo/index.git"),
             "",
             "",
-        );
+        ).unwrap();
         match source {
             Some(NixSource::Registry { index }) => {
                 assert_eq!(index, "https://dl.cloudsmith.io/public/my-org/my-repo/cargo/index.git");
@@ -189,7 +197,7 @@ mod tests {
 
     #[test]
     fn parse_source_local() {
-        let source = parse_source(None, "/home/user/project/crates/foo/Cargo.toml", "/home/user/project");
+        let source = parse_source(None, "/home/user/project/crates/foo/Cargo.toml", "/home/user/project").unwrap();
         match source {
             Some(NixSource::Local { path }) => assert_eq!(path, "crates/foo"),
             other => panic!("expected Local, got {other:?}"),
@@ -198,7 +206,7 @@ mod tests {
 
     #[test]
     fn parse_source_local_root() {
-        let source = parse_source(None, "/home/user/project/Cargo.toml", "/home/user/project");
+        let source = parse_source(None, "/home/user/project/Cargo.toml", "/home/user/project").unwrap();
         match source {
             Some(NixSource::Local { path }) => assert_eq!(path, "."),
             other => panic!("expected Local with '.', got {other:?}"),
@@ -211,7 +219,7 @@ mod tests {
             Some("git+https://github.com/example/repo.git?rev=abc123#abc123def456"),
             "/home/user/.cargo/git/checkouts/repo/abc123/Cargo.toml",
             "",
-        );
+        ).unwrap();
         match source {
             Some(NixSource::Git { url, rev, sub_dir, sha256 }) => {
                 assert_eq!(url, "https://github.com/example/repo.git");
@@ -229,7 +237,7 @@ mod tests {
             Some("git+https://github.com/org/monorepo.git?rev=abc123#abc123def456"),
             "/home/user/.cargo/git/checkouts/monorepo/abc123/crates/my-crate/Cargo.toml",
             "",
-        );
+        ).unwrap();
         match source {
             Some(NixSource::Git { url, rev, sub_dir, sha256 }) => {
                 assert_eq!(url, "https://github.com/org/monorepo.git");
@@ -239,6 +247,23 @@ mod tests {
             }
             other => panic!("expected Git with sub_dir, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_source_unknown_type_errors() {
+        let result = parse_source(Some("sparse+https://example.com/index/"), "", "");
+        assert!(result.is_err(), "unknown source type should return Err");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("unknown source type"), "error should mention unknown type: {msg}");
+    }
+
+    #[test]
+    fn parse_source_malformed_git_errors() {
+        // Missing fragment (no #)
+        let result = parse_source(Some("git+https://example.com/repo.git"), "", "");
+        assert!(result.is_err(), "malformed git URL should return Err");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("malformed"), "error should mention malformed: {msg}");
     }
 
     #[test]

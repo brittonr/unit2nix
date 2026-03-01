@@ -129,15 +129,17 @@ pub fn merge(
         // Source info: prefer metadata, fall back to inferring from pkg_id.
         // Some crates appear in the unit graph but not in cargo metadata
         // (e.g., transitive deps pulled in by feature-specific resolution).
-        let source = meta_pkg
-            .and_then(|m| {
-                parse_source(
-                    m.source.as_deref(),
-                    &m.manifest_path,
-                    &metadata.workspace_root,
-                )
-            })
-            .or_else(|| infer_source_from_pkg_id(pkg_id));
+        let source = if let Some(m) = meta_pkg {
+            match parse_source(m.source.as_deref(), &m.manifest_path, &metadata.workspace_root) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("warning: {e:#} for {crate_name}, falling back to pkg_id inference");
+                    infer_source_from_pkg_id(pkg_id)
+                }
+            }
+        } else {
+            infer_source_from_pkg_id(pkg_id)
+        };
 
         // Crate root directory (from manifest_path, strip Cargo.toml)
         let crate_root = meta_pkg

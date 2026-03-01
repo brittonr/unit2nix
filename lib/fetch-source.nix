@@ -80,5 +80,8 @@ else if sourceType == "git" then
   if subDir != null then repo + "/${subDir}" else repo
 
 else
-  # Fallback: treat as local
-  src
+  builtins.throw ''
+    unit2nix: crate ${crateInfo.crateName}-${crateInfo.version} has unknown source type "${sourceType}".
+    This likely means a newer Cargo source type that unit2nix doesn't handle yet.
+    Please report this at the unit2nix bug tracker with your Cargo.lock.
+  ''
