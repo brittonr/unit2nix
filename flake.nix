@@ -13,6 +13,14 @@
       flake-utils,
       ...
     }:
+    {
+      # Flake template (not per-system)
+      templates.default = {
+        description = "Rust project with unit2nix per-crate Nix builds";
+        path = ./templates/default;
+      };
+    }
+    //
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -31,6 +39,7 @@
             resolvedJson,
             buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
             defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+            skipStalenessCheck ? false,
           }:
           import ./lib/build-from-unit-graph.nix {
             inherit
@@ -39,6 +48,7 @@
               resolvedJson
               buildRustCrateForPkgs
               defaultCrateOverrides
+              skipStalenessCheck
               ;
           };
 

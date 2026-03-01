@@ -4,6 +4,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
 
 /// Generate per-crate Nix build plans from Cargo's unit graph.
 ///
@@ -151,6 +152,9 @@ struct NixBuildPlan {
     /// Target triple this plan was resolved for (null = host).
     #[serde(skip_serializing_if = "Option::is_none")]
     target: Option<String>,
+    /// SHA256 hash of the Cargo.lock file content.
+    /// Used by the Nix consumer to detect stale build plans.
+    cargo_lock_hash: String,
     crates: BTreeMap<String, NixCrate>,
 }
 
@@ -272,6 +276,25 @@ fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
     }
 
     serde_json::from_slice(&output.stdout).context("failed to parse cargo metadata JSON")
+}
+
+/// Compute SHA256 hash of the Cargo.lock file content.
+///
+/// Returns a hex-encoded hash string. The Nix consumer compares this
+/// against `builtins.hashFile "sha256"` of the workspace's Cargo.lock
+/// to detect stale build plans.
+fn hash_cargo_lock(manifest_path: &str) -> Result<String> {
+    let manifest = std::path::Path::new(manifest_path);
+    let lock_path = manifest
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("Cargo.lock");
+
+    let content = std::fs::read(&lock_path)
+        .with_context(|| format!("failed to read {} for hashing", lock_path.display()))?;
+
+    let hash = Sha256::digest(&content);
+    Ok(format!("{:x}", hash))
 }
 
 fn read_cargo_lock(manifest_path: &str) -> Result<CargoLock> {
@@ -505,7 +528,7 @@ fn parse_pkg_id(pkg_id: &str) -> (String, String) {
     ("unknown".to_string(), "0.0.0".to_string())
 }
 
-fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock, target: Option<&str>) -> Result<NixBuildPlan> {
+fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock, target: Option<&str>, cargo_lock_hash: String) -> Result<NixBuildPlan> {
     // Index metadata packages by their id
     let meta_by_id: BTreeMap<&str, &MetadataPackage> = metadata
         .packages
@@ -828,6 +851,7 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock, tar
         roots,
         workspace_members,
         target: target.map(|s| s.to_string()),
+        cargo_lock_hash,
         crates,
     })
 }
@@ -853,8 +877,12 @@ fn main() -> Result<()> {
             .unwrap_or(0)
     );
 
+    eprintln!("Hashing Cargo.lock...");
+    let cargo_lock_hash = hash_cargo_lock(&cli.manifest_path)?;
+    eprintln!("  sha256: {cargo_lock_hash}");
+
     eprintln!("Merging...");
-    let mut plan = merge(&unit_graph, &metadata, &lock, cli.target.as_deref())?;
+    let mut plan = merge(&unit_graph, &metadata, &lock, cli.target.as_deref(), cargo_lock_hash)?;
     eprintln!("  {} crates in build plan", plan.crates.len());
     eprintln!("  {} workspace members", plan.workspace_members.len());
     if let Some(ref t) = plan.target {
@@ -1006,5 +1034,23 @@ mod tests {
             compute_git_subdir("/some/random/path/Cargo.toml"),
             None
         );
+    }
+
+    #[test]
+    fn cargo_lock_hash_is_sha256_hex() {
+        // Hash our own Cargo.lock as a smoke test
+        let hash = hash_cargo_lock("./Cargo.toml").expect("should hash Cargo.lock");
+        assert_eq!(hash.len(), 64, "SHA256 hex should be 64 chars, got: {hash}");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "hash should be hex, got: {hash}"
+        );
+    }
+
+    #[test]
+    fn cargo_lock_hash_is_deterministic() {
+        let h1 = hash_cargo_lock("./Cargo.toml").unwrap();
+        let h2 = hash_cargo_lock("./Cargo.toml").unwrap();
+        assert_eq!(h1, h2, "same file should produce same hash");
     }
 }

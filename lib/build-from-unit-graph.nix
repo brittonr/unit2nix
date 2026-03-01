@@ -23,10 +23,39 @@
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
   # Optional: default crate overrides
   defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+  # Skip the Cargo.lock staleness check (default: false).
+  # Set to true when src filtering strips Cargo.lock or for other edge cases.
+  skipStalenessCheck ? false,
 }:
 
 let
   resolved = builtins.fromJSON (builtins.readFile resolvedJson);
+
+  # Staleness check: verify build-plan.json matches the current Cargo.lock.
+  # Skipped when: check is disabled, hash is absent (old unit2nix), or Cargo.lock missing.
+  cargoLockPath = src + "/Cargo.lock";
+  hasCargoLockHash = (resolved.cargoLockHash or null) != null;
+  cargoLockExists = builtins.pathExists cargoLockPath;
+  shouldCheck = !skipStalenessCheck && hasCargoLockHash && cargoLockExists;
+  currentHash = if shouldCheck then builtins.hashFile "sha256" cargoLockPath else "";
+  _stalenessCheck =
+    if shouldCheck && currentHash != resolved.cargoLockHash then
+      builtins.throw ''
+        unit2nix: build-plan.json is out of date!
+
+        The Cargo.lock has changed since build-plan.json was generated.
+        Regenerate it with:
+
+          unit2nix --manifest-path ./Cargo.toml -o build-plan.json
+
+        Or set skipStalenessCheck = true to bypass this check.
+
+        Expected: ${resolved.cargoLockHash}
+        Got:      ${currentHash}
+      ''
+    else
+      true;
+
   fetchSource = import ./fetch-source.nix { inherit pkgs src; };
 
   # Build the recursive crate set for a given pkgs instance.
@@ -154,6 +183,7 @@ let
   builtCrates = mkBuiltByPackageIdByPkgs pkgs;
 
 in
+assert _stalenessCheck;
 {
   # Workspace members keyed by crate name → { packageId, build }.
   # Uses the explicit workspaceMembers map from the JSON (set by cargo metadata),

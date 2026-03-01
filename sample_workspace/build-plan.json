@@ -13,6 +13,7 @@
     "sample-lib": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-lib#0.1.0",
     "sample-macro": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-macro#0.1.0"
   },
+  "cargoLockHash": "25cc0bceeb4acb009d7d55b79b7e4561b594afd0040ec69e3008cc1f7a1df820",
   "crates": {
     "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0": {
       "crateName": "sample-bin",
