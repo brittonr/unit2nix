@@ -414,6 +414,10 @@ fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock) -> 
             for (_, u) in dep_units {
                 for dep in &u.dependencies {
                     let dep_unit = &unit_graph.units[dep.index];
+                    // Skip self-references (bin → lib within same package)
+                    if unit_pkg_ids[dep.index] == *pkg_id {
+                        continue;
+                    }
                     if dep_unit.mode == "run-custom-build" {
                         continue;
                     }
