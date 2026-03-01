@@ -46,10 +46,15 @@ else if sourceType == "registry" then
   # The source.index field contains the registry index URL for reference.
   builtins.throw ''
     Crate ${crateInfo.crateName}-${crateInfo.version} uses alternative registry: ${source.index or "unknown"}
-    Alternative registries are not yet auto-fetched. Provide the source via defaultCrateOverrides:
-      defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-        ${crateInfo.crateName} = attrs: { src = fetchurl { ... }; };
-      };
+    Alternative registries are not yet auto-fetched. Override the source via buildRustCrateForPkgs:
+      buildRustCrateForPkgs = pkgs: (pkgs.buildRustCrate.override {
+        defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+          ${crateInfo.crateName} = attrs: {
+            src = pkgs.fetchurl { url = "..."; sha256 = "..."; };
+          };
+        };
+      });
+    Registry index: ${source.index or "unknown"}
   ''
 
 else if sourceType == "git" then

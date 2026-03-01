@@ -6,10 +6,10 @@ use serde::Deserialize;
 
 use crate::output::{NixBuildPlan, NixSource};
 
-/// Prefetch result from `nix-prefetch-git`.
+/// Prefetch result from `nix-prefetch-git` (only the fields we need).
 #[derive(Debug, Deserialize)]
-pub struct PrefetchGitResult {
-    pub sha256: String,
+struct PrefetchGitResult {
+    sha256: String,
 }
 
 /// Run `nix-prefetch-git` to get the SHA256 of a git checkout.
@@ -64,7 +64,8 @@ pub fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
 
         // Apply the hash to all crates from this repo
         for pkg_id in pkg_ids {
-            if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut plan.crates.get_mut(pkg_id).unwrap().source {
+            if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut plan.crates.get_mut(pkg_id)
+                .expect("pkg_id was collected from this map").source {
                 *hash = Some(sha256.clone());
             }
         }

@@ -8,9 +8,21 @@ use crate::output::{NixBuildPlan, NixCrate, NixDep, NixBinTarget};
 use crate::source::{parse_source, infer_source_from_pkg_id};
 
 /// Returns true if the target kind represents a library (lib, rlib, cdylib, etc).
-pub fn is_lib_kind(kind: &[String]) -> bool {
+fn is_lib_kind(kind: &[String]) -> bool {
     kind.iter()
         .any(|k| matches!(k.as_str(), "lib" | "rlib" | "cdylib" | "dylib" | "staticlib"))
+}
+
+fn is_proc_macro(kind: &[String]) -> bool {
+    kind.iter().any(|k| k == "proc-macro")
+}
+
+fn is_bin(kind: &[String]) -> bool {
+    kind.iter().any(|k| k == "bin")
+}
+
+fn is_custom_build(kind: &[String]) -> bool {
+    kind.iter().any(|k| k == "custom-build")
 }
 
 /// Extract name@version from a pkg_id string.
@@ -78,17 +90,17 @@ pub fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock,
             .or_else(|| {
                 units
                     .iter()
-                    .find(|(_, u)| u.mode == "build" && u.target.kind.contains(&"proc-macro".to_string()))
+                    .find(|(_, u)| u.mode == "build" && is_proc_macro(&u.target.kind))
             });
 
         let bin_units: Vec<&(usize, &Unit)> = units
             .iter()
-            .filter(|(_, u)| u.mode == "build" && u.target.kind.contains(&"bin".to_string()))
+            .filter(|(_, u)| u.mode == "build" && is_bin(&u.target.kind))
             .collect();
 
         let build_script_unit = units
             .iter()
-            .find(|(_, u)| u.mode == "build" && u.target.kind.contains(&"custom-build".to_string()));
+            .find(|(_, u)| u.mode == "build" && is_custom_build(&u.target.kind));
 
         // Skip run-custom-build units (they're internal)
         // Skip units that are only run-custom-build with no lib/bin
@@ -113,7 +125,7 @@ pub fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock,
             let mut all_features: Vec<String> = Vec::new();
             for (_, u) in units {
                 if u.mode == "build" && (is_lib_kind(&u.target.kind)
-                    || u.target.kind.contains(&"proc-macro".to_string()))
+                    || is_proc_macro(&u.target.kind))
                 {
                     for f in &u.features {
                         if !all_features.contains(f) {
@@ -127,7 +139,7 @@ pub fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock,
         };
 
         // Is this a proc-macro?
-        let proc_macro = primary.target.kind.contains(&"proc-macro".to_string());
+        let proc_macro = is_proc_macro(&primary.target.kind);
 
         // Normal dependencies: union across the primary unit and all lib-like
         // units for this package. Different feature variants may pull in
@@ -138,8 +150,8 @@ pub fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock,
             let dep_units = units.iter().filter(|(_, u)| {
                 u.mode == "build"
                     && (is_lib_kind(&u.target.kind)
-                        || u.target.kind.contains(&"proc-macro".to_string())
-                        || u.target.kind.contains(&"bin".to_string()))
+                        || is_proc_macro(&u.target.kind)
+                        || is_bin(&u.target.kind))
             });
             for (_, u) in dep_units {
                 for dep in &u.dependencies {
@@ -359,4 +371,33 @@ pub fn merge(unit_graph: &UnitGraph, metadata: &CargoMetadata, lock: &CargoLock,
         cargo_lock_hash,
         crates,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pkg_id;
+
+    #[test]
+    fn parse_registry_pkg_id() {
+        let (name, version) =
+            parse_pkg_id("registry+https://github.com/rust-lang/crates.io-index#serde@1.0.200");
+        assert_eq!(name, "serde");
+        assert_eq!(version, "1.0.200");
+    }
+
+    #[test]
+    fn parse_path_pkg_id() {
+        let (name, version) =
+            parse_pkg_id("path+file:///home/user/project/crates/aspen-core#0.1.0");
+        assert_eq!(name, "aspen-core");
+        assert_eq!(version, "0.1.0");
+    }
+
+    #[test]
+    fn parse_git_pkg_id() {
+        let (name, version) =
+            parse_pkg_id("git+https://github.com/example/repo.git?rev=abc123#my-crate@0.5.0");
+        assert_eq!(name, "my-crate");
+        assert_eq!(version, "0.5.0");
+    }
 }

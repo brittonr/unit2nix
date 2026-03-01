@@ -28,6 +28,4 @@ pub struct UnitTarget {
 pub struct UnitDep {
     pub index: usize,
     pub extern_crate_name: String,
-    #[allow(dead_code)]
-    pub public: bool,
 }

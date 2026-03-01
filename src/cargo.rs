@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -6,6 +7,14 @@ use sha2::{Sha256, Digest};
 use crate::cli::Cli;
 use crate::unit_graph::UnitGraph;
 use crate::metadata::{CargoMetadata, CargoLock};
+
+/// Resolve the Cargo.lock path from a manifest path.
+fn cargo_lock_path(manifest_path: &str) -> PathBuf {
+    Path::new(manifest_path)
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("Cargo.lock")
+}
 
 /// Run a cargo subcommand and return its stdout on success.
 ///
@@ -22,7 +31,13 @@ pub fn run_cargo(args: &[&str], manifest_path: &str, description: &str) -> Resul
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("{} failed:\n{}", description, stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.is_empty() {
+            bail!("{} failed:\n{}", description, stderr);
+        } else {
+            let preview = &stdout[..stdout.len().min(500)];
+            bail!("{} failed:\nstderr: {}\nstdout (truncated): {}", description, stderr, preview);
+        }
     }
 
     Ok(output.stdout)
@@ -30,7 +45,7 @@ pub fn run_cargo(args: &[&str], manifest_path: &str, description: &str) -> Resul
 
 /// Run `cargo build --unit-graph` and parse the result.
 pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
-    let mut args = vec![
+    let mut args: Vec<&str> = vec![
         "build",
         "--unit-graph",
         "-Z",
@@ -38,16 +53,8 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
         "--locked",
     ];
 
-    // Build args vec from CLI options
-    let features_str;
-    let bin_str;
-    let package_str;
-    let target_str;
-
-    if let Some(features) = &cli.features {
-        features_str = features.clone();
-        args.push("--features");
-        args.push(&features_str);
+    if let Some(features) = cli.features.as_deref() {
+        args.extend_from_slice(&["--features", features]);
     }
     if cli.all_features {
         args.push("--all-features");
@@ -55,20 +62,14 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     if cli.no_default_features {
         args.push("--no-default-features");
     }
-    if let Some(bin) = &cli.bin {
-        bin_str = bin.clone();
-        args.push("--bin");
-        args.push(&bin_str);
+    if let Some(bin) = cli.bin.as_deref() {
+        args.extend_from_slice(&["--bin", bin]);
     }
-    if let Some(package) = &cli.package {
-        package_str = package.clone();
-        args.push("--package");
-        args.push(&package_str);
+    if let Some(package) = cli.package.as_deref() {
+        args.extend_from_slice(&["--package", package]);
     }
-    if let Some(target) = &cli.target {
-        target_str = target.clone();
-        args.push("--target");
-        args.push(&target_str);
+    if let Some(target) = cli.target.as_deref() {
+        args.extend_from_slice(&["--target", target]);
     }
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo build --unit-graph")?;
@@ -84,15 +85,9 @@ pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
 
 /// Read and parse the Cargo.lock file.
 pub fn read_cargo_lock(manifest_path: &str) -> Result<CargoLock> {
-    let manifest = std::path::Path::new(manifest_path);
-    let lock_path = manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("Cargo.lock");
-
+    let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read_to_string(&lock_path)
         .with_context(|| format!("failed to read {}", lock_path.display()))?;
-
     toml::from_str(&content).context("failed to parse Cargo.lock")
 }
 
@@ -102,15 +97,32 @@ pub fn read_cargo_lock(manifest_path: &str) -> Result<CargoLock> {
 /// against `builtins.hashFile "sha256"` of the workspace's Cargo.lock
 /// to detect stale build plans.
 pub fn hash_cargo_lock(manifest_path: &str) -> Result<String> {
-    let manifest = std::path::Path::new(manifest_path);
-    let lock_path = manifest
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("Cargo.lock");
-
+    let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read(&lock_path)
         .with_context(|| format!("failed to read {} for hashing", lock_path.display()))?;
-
     let hash = Sha256::digest(&content);
     Ok(format!("{:x}", hash))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_cargo_lock;
+
+    #[test]
+    fn cargo_lock_hash_is_sha256_hex() {
+        // Hash our own Cargo.lock as a smoke test
+        let hash = hash_cargo_lock("./Cargo.toml").expect("should hash Cargo.lock");
+        assert_eq!(hash.len(), 64, "SHA256 hex should be 64 chars, got: {hash}");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "hash should be hex, got: {hash}"
+        );
+    }
+
+    #[test]
+    fn cargo_lock_hash_is_deterministic() {
+        let h1 = hash_cargo_lock("./Cargo.toml").unwrap();
+        let h2 = hash_cargo_lock("./Cargo.toml").unwrap();
+        assert_eq!(h1, h2, "same file should produce same hash");
+    }
 }

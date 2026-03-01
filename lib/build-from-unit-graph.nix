@@ -74,7 +74,7 @@ let
       self = {
         # Each crate keyed by its full package ID
         crates = lib.mapAttrs (
-          packageId: _crateInfo: buildCrate self cratePkgs buildRustCrate packageId
+          packageId: _: buildCrate self cratePkgs buildRustCrate packageId
         ) resolved.crates;
 
         # For proc-macro / build-dep host platform builds
@@ -134,6 +134,12 @@ let
         lib.mapAttrs (_name: builtins.map versionAndRename) grouped;
 
       crateSrc = fetchSource crateInfo;
+
+      # Pass a field through to buildRustCrate only when it's non-null.
+      optionalField = field:
+        lib.optionalAttrs ((crateInfo.${field} or null) != null) {
+          ${field} = crateInfo.${field};
+        };
     in
     buildRustCrate (
       {
@@ -147,37 +153,19 @@ let
         crateBin = crateInfo.crateBin or [ ];
         authors = crateInfo.authors or [ ];
       }
-      // lib.optionalAttrs ((crateInfo.sha256 or null) != null) {
-        sha256 = crateInfo.sha256;
-      }
-      // lib.optionalAttrs ((crateInfo.build or null) != null) {
-        build = crateInfo.build;
-      }
-      // lib.optionalAttrs ((crateInfo.libPath or null) != null) {
-        libPath = crateInfo.libPath;
-      }
-      // lib.optionalAttrs ((crateInfo.libName or null) != null) {
-        libName = crateInfo.libName;
-      }
-      // lib.optionalAttrs ((crateInfo.links or null) != null) {
-        links = crateInfo.links;
-      }
+      // optionalField "sha256"
+      // optionalField "build"
+      // optionalField "libPath"
+      // optionalField "libName"
+      // optionalField "links"
       // lib.optionalAttrs ((crateInfo.libCrateTypes or [ ]) != [ ]) {
         type = crateInfo.libCrateTypes;
       }
       # Package metadata for CARGO_PKG_* env vars in build scripts
-      // lib.optionalAttrs ((crateInfo.description or null) != null) {
-        description = crateInfo.description;
-      }
-      // lib.optionalAttrs ((crateInfo.homepage or null) != null) {
-        homepage = crateInfo.homepage;
-      }
-      // lib.optionalAttrs ((crateInfo.license or null) != null) {
-        license = crateInfo.license;
-      }
-      // lib.optionalAttrs ((crateInfo.repository or null) != null) {
-        repository = crateInfo.repository;
-      }
+      // optionalField "description"
+      // optionalField "homepage"
+      // optionalField "license"
+      // optionalField "repository"
     );
 
   builtCrates = mkBuiltByPackageIdByPkgs pkgs;

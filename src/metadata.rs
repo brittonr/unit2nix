@@ -12,13 +12,9 @@ pub struct CargoMetadata {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // Fields consumed by serde deserialization + meta_by_id lookups
 pub struct MetadataPackage {
     pub id: String,
-    pub name: String,
-    pub version: String,
     pub source: Option<String>,
-    pub targets: Vec<MetadataTarget>,
     pub links: Option<String>,
     pub manifest_path: String,
     pub authors: Option<Vec<String>>,
@@ -26,14 +22,6 @@ pub struct MetadataPackage {
     pub homepage: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)] // Fields consumed by serde deserialization
-pub struct MetadataTarget {
-    pub kind: Vec<String>,
-    pub name: String,
-    pub src_path: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +37,5 @@ pub struct CargoLock {
 pub struct LockPackage {
     pub name: String,
     pub version: String,
-    #[allow(dead_code)]
-    pub source: Option<String>,
     pub checksum: Option<String>,
 }
