@@ -243,7 +243,16 @@ nix flake check         # 4 checks: sample build + 3 NixOS VM tests
 ## Repository structure
 
 ```
-src/main.rs                     # Rust merger (unit-graph + metadata + Cargo.lock)
+src/
+  main.rs                       # Entry point + tests
+  cli.rs                        # CLI argument parsing (clap)
+  cargo.rs                      # Cargo command runners (unit-graph, metadata, Cargo.lock)
+  unit_graph.rs                 # Unit graph deserialization types
+  metadata.rs                   # Cargo metadata + Cargo.lock types
+  output.rs                     # Output serialization types (NixBuildPlan, NixCrate, etc.)
+  source.rs                     # Source parsing (crates.io, git, local, registry)
+  merge.rs                      # Core merge logic (unit-graph + metadata + Cargo.lock → plan)
+  prefetch.rs                   # Git dependency SHA256 prefetching
 lib/build-from-unit-graph.nix   # Nix consumer (buildRustCrate wiring)
 lib/fetch-source.nix            # Source fetching (local, crates.io, git+subdir)
 flake.nix                       # Flake with lib, packages, checks, devshell
