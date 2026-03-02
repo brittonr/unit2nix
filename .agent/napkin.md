@@ -69,6 +69,22 @@ Changes made:
 - **Tests**: Added 3 new tests (infer_git_with_rev_query_param, infer_git_with_bare_hash, infer_git_no_rev_with_name_at_version)
 - **Verification**: `cargo test` 17/17 pass, `cargo clippy` 0 warnings, `nix build` + `nix flake check` all pass
 
+## Session: 2026-03-01 #4 — cargo subcommand + IFD auto-build
+Changes made:
+- **cargo-unit2nix**: second `[[bin]]` entry with separate `cargo_main.rs` that strips cargo's inserted subcommand arg
+- **nix run .#update-plan**: flake app wrapping unit2nix for zero-install regen
+- **Wrapper fix**: `--prefix PATH` for cargo/rustc (user's `~/.local/bin/cargo` was a shell wrapper that polluted stdout via shellHook)
+- **IFD auto-build**: `buildFromUnitGraphAuto` — vendors crate sources from Cargo.lock checksums, runs unit2nix in sandbox, IFDs result
+- **lib/vendor.nix**: parses Cargo.lock via `lib.importTOML`, fetches crates.io via `fetchurl`, git via `fetchgit`/`builtins.fetchGit`
+- **lib/auto.nix**: orchestrates vendor → unit2nix → buildFromUnitGraph with `skipStalenessCheck = true`
+- **Validation**: 7 flake checks pass (new: `sample-auto`), auto mode produces identical binaries to manual mode
+
+Lessons:
+- Two `[[bin]]` entries sharing same `main.rs` produces cargo warning — use separate entry point file
+- `cargo unit2nix` invocation passes extra arg (`cargo-unit2nix unit2nix -o foo`) — must strip it
+- IFD ≠ impure. IFD is orthogonal to pure eval. Only Hydra blocks IFD (`allow-import-from-derivation = false`)
+- User's cargo wrapper (`~/.local/bin/cargo`) runs `nix develop --command cargo` which echoes shellHook to stdout, corrupting piped JSON — fix by `--prefix PATH` with clean Nix cargo
+
 ## Session: 2026-03-01 #3 — Error handling, bat validation, archive
 Changes made:
 - **Error handling**: `parse_source` now returns `Result<Option<NixSource>>` — unknown/malformed sources produce `Err` instead of silent `None`

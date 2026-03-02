@@ -52,6 +52,25 @@
               ;
           };
 
+        # Auto mode: generate build plan via IFD (no manual step needed).
+        # Requires IFD enabled (default in Nix; disabled on Hydra).
+        buildFromUnitGraphAuto =
+          {
+            pkgs ? nixpkgs.legacyPackages.${system},
+            src,
+            buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
+            defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+          }:
+          import ./lib/auto.nix {
+            inherit
+              pkgs
+              src
+              buildRustCrateForPkgs
+              defaultCrateOverrides
+              ;
+            unit2nix = self.packages.${system}.unit2nix;
+          };
+
         # The unit2nix binary itself
         unit2nix =
           let
@@ -111,7 +130,7 @@
       {
         # Library output
         lib = {
-          inherit buildFromUnitGraph;
+          inherit buildFromUnitGraph buildFromUnitGraphAuto;
         };
 
         # Packages
@@ -125,6 +144,12 @@
         # Checks
         checks = {
           sample-builds = sampleWorkspace.allWorkspaceMembers;
+
+          # Auto mode (IFD): builds sample_workspace with no pre-generated JSON
+          sample-auto = (buildFromUnitGraphAuto {
+            inherit pkgs;
+            src = ./sample_workspace;
+          }).allWorkspaceMembers;
 
           # Real-world validation: pure Rust workspace (34 crates)
           validate-ripgrep = import ./tests/ripgrep/build.nix { inherit pkgs; };

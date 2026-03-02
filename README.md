@@ -73,6 +73,32 @@ cargo unit2nix -o build-plan.json
 nix build
 ```
 
+### Or use auto mode (no manual step)
+
+Auto mode uses IFD to generate the build plan at eval time — no `build-plan.json` to maintain:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    unit2nix.url = "github:brittonr/unit2nix";
+  };
+
+  outputs = { nixpkgs, unit2nix, ... }:
+    let
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      ws = unit2nix.lib.x86_64-linux.buildFromUnitGraphAuto {
+        inherit pkgs;
+        src = ./.;
+      };
+    in {
+      packages.x86_64-linux.default = ws.workspaceMembers."my-crate".build;
+    };
+}
+```
+
+> **Auto vs manual mode**: Auto mode requires [IFD](https://nix.dev/manual/nix/latest/language/import-from-derivation) (enabled by default in Nix, disabled on Hydra). If you use Hydra or need maximum eval performance, use manual mode with a checked-in `build-plan.json`. Both produce identical builds.
+
 ### Or set up manually
 
 ```nix
@@ -134,7 +160,7 @@ Options:
 
 ## Nix API
 
-### `buildFromUnitGraph`
+### `buildFromUnitGraph` (manual mode)
 
 ```nix
 buildFromUnitGraph {
@@ -146,6 +172,27 @@ buildFromUnitGraph {
   skipStalenessCheck ? false;                         # skip Cargo.lock hash check
 }
 ```
+
+### `buildFromUnitGraphAuto` (auto mode)
+
+```nix
+buildFromUnitGraphAuto {
+  pkgs;                                              # nixpkgs instance
+  src;                                               # workspace source root (must contain Cargo.lock)
+  buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate; # override buildRustCrate
+  defaultCrateOverrides ? pkgs.defaultCrateOverrides; # crate-specific overrides
+}
+```
+
+No `resolvedJson` needed — the build plan is generated at eval time via IFD. Crate sources are vendored from `Cargo.lock` checksums (no network in the build sandbox). If the workspace has git dependencies, place a `crate-hashes.json` at the workspace root with SHA256 hashes:
+
+```json
+{
+  "https://github.com/user/repo?branch=main#crate-name@1.0.0": "sha256-..."
+}
+```
+
+This follows the same convention as crate2nix, so existing `crate-hashes.json` files work.
 
 ### Keeping build-plan.json up to date
 
