@@ -18,10 +18,11 @@
 
       # Build the workspace from the pre-resolved build plan.
       #
-      # Generate build-plan.json with:
-      #   nix run github:brittonr/unit2nix -- --manifest-path ./Cargo.toml -o build-plan.json
+      # Generate/update build-plan.json with:
+      #   nix run .#update-plan
       #
       # Regenerate whenever Cargo.lock changes (unit2nix will warn if stale).
+      # You can also use: cargo unit2nix -o build-plan.json (after cargo install cargo-unit2nix)
       ws = unit2nix.lib.${system}.buildFromUnitGraph {
         inherit pkgs;
         src = ./.;
@@ -52,5 +53,15 @@
 
       # Or build all workspace members:
       # packages.${system}.default = ws.allWorkspaceMembers;
+
+      # Regenerate build-plan.json when Cargo.lock changes
+      apps.${system}.update-plan = {
+        type = "app";
+        program = toString (pkgs.writeShellScript "update-plan" ''
+          exec ${unit2nix.packages.${system}.unit2nix}/bin/unit2nix \
+            --manifest-path ./Cargo.toml \
+            -o build-plan.json
+        '');
+      };
     };
 }

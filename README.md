@@ -31,6 +31,20 @@ build-plan.json ─→ build-from-unit-graph.nix ─→ 457 buildRustCrate deriv
 
 Cargo does all dependency resolution, feature expansion, and platform filtering. unit2nix merges three Cargo outputs into one JSON. Git dependencies are prefetched at generation time so the Nix consumer can use fixed-output derivations — no `--impure` needed. The Nix consumer is a thin wrapper — no `cfg()` evaluator, no feature resolver.
 
+## Install
+
+**Via Nix (recommended)** — no install needed, use `nix run`:
+
+```bash
+nix run github:brittonr/unit2nix -- --help
+```
+
+**Via cargo** — installs `unit2nix` and `cargo unit2nix` subcommand:
+
+```bash
+cargo install cargo-unit2nix
+```
+
 ## Quickstart
 
 ### 1. Scaffold a flake
@@ -39,18 +53,19 @@ Cargo does all dependency resolution, feature expansion, and platform filtering.
 nix flake init -t github:brittonr/unit2nix
 ```
 
-This creates a `flake.nix` pre-wired with unit2nix. Edit it to set your crate name.
+This creates a `flake.nix` pre-wired with unit2nix, including a `nix run .#update-plan` app. Edit it to set your crate name.
 
 ### 2. Generate a build plan
 
 ```bash
-# Requires nightly Rust (for --unit-graph)
-nix run github:brittonr/unit2nix -- \
-  --manifest-path ./Cargo.toml \
-  -o build-plan.json
+nix run .#update-plan
 ```
 
-Regenerate whenever `Cargo.lock` changes — unit2nix will fail at eval time if the plan is stale.
+Or equivalently:
+
+```bash
+cargo unit2nix -o build-plan.json
+```
 
 ### 3. Build
 
@@ -132,14 +147,16 @@ buildFromUnitGraph {
 }
 ```
 
-### Staleness detection
+### Keeping build-plan.json up to date
 
-unit2nix embeds a SHA256 hash of `Cargo.lock` in `build-plan.json`. At Nix eval time, the hash is compared against the current `Cargo.lock`. If they differ, evaluation fails with:
+Regenerate whenever `Cargo.toml` or `Cargo.lock` changes:
 
+```bash
+nix run .#update-plan          # Nix users (zero install)
+cargo unit2nix -o build-plan.json   # cargo users
 ```
-unit2nix: build-plan.json is out of date!
-Regenerate it with: unit2nix --manifest-path ./Cargo.toml -o build-plan.json
-```
+
+unit2nix embeds a SHA256 hash of `Cargo.lock` in `build-plan.json`. At Nix eval time, the hash is compared against the current `Cargo.lock`. If they differ, evaluation fails with a clear error telling you exactly what to run.
 
 To disable (e.g., when source filtering strips `Cargo.lock`):
 
@@ -246,7 +263,8 @@ nix flake check         # 7 checks: sample build + bat/ripgrep validation + 3 Ni
 
 ```
 src/
-  main.rs                       # Entry point + tests
+  main.rs                       # Entry point
+  cargo_main.rs                 # cargo-unit2nix subcommand entry point
   cli.rs                        # CLI argument parsing (clap)
   cargo.rs                      # Cargo command runners (unit-graph, metadata, Cargo.lock)
   unit_graph.rs                 # Unit graph deserialization types

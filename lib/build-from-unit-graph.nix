@@ -46,9 +46,13 @@ let
         The Cargo.lock has changed since build-plan.json was generated.
         Regenerate it with:
 
-          unit2nix --manifest-path ./Cargo.toml -o build-plan.json
+          nix run .#update-plan
 
-        Or set skipStalenessCheck = true to bypass this check.
+        Or if you have cargo-unit2nix installed:
+
+          cargo unit2nix -o build-plan.json
+
+        Set skipStalenessCheck = true to bypass this check.
 
         Expected: ${resolved.cargoLockHash}
         Got:      ${currentHash}

@@ -86,11 +86,17 @@
             paths = [ unwrapped ];
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postBuild = ''
-              wrapProgram $out/bin/unit2nix \
-                --suffix PATH : ${pkgs.lib.makeBinPath [
-                  pkgs.nix-prefetch-git
-                  pkgs.nix
-                ]}
+              for bin in $out/bin/unit2nix $out/bin/cargo-unit2nix; do
+                wrapProgram "$bin" \
+                  --prefix PATH : ${pkgs.lib.makeBinPath [
+                    pkgs.cargo
+                    pkgs.rustc
+                  ]} \
+                  --suffix PATH : ${pkgs.lib.makeBinPath [
+                    pkgs.nix-prefetch-git
+                    pkgs.nix
+                  ]}
+              done
             '';
             inherit (unwrapped) meta version;
           };
@@ -137,6 +143,16 @@
           vm-rebuild-isolation = import ./tests/vm/rebuild-isolation.nix {
             inherit pkgs sampleWorkspace;
           };
+        };
+
+        # Apps
+        apps.update-plan = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "update-plan" ''
+            exec ${unit2nix}/bin/unit2nix \
+              --manifest-path ./Cargo.toml \
+              -o build-plan.json
+          '');
         };
 
         # Dev shell
