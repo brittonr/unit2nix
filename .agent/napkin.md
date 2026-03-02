@@ -14,7 +14,7 @@
 - Done: second cleanup pass — see session 2026-03-01 #2 below
 
 ## Patterns That Work
-- `cargo test` runs 17 unit tests — all pure (no cargo invocation needed)
+- `cargo test` runs 20 unit tests — all pure (no cargo invocation needed)
 - Tests cover: parse_pkg_id, parse_source variants, compute_git_subdir, cargo_lock_hash, git rev extraction
 - Nix checks: `nix flake check` runs sample workspace build + VM tests (Linux only)
 - Must `git add` new files before `nix build` — cleanSourceFilter excludes untracked files
@@ -108,6 +108,28 @@ Lessons:
 - Cargo's git cache dir names use SipHash of canonical URL — impossible to replicate in pure Nix. Intercepting git CLI is simpler
 - `cp -r ${src} source` loses parent context — `workspaceDir` param lets auto.nix copy the full parent tree and find Cargo.toml at the right relative path
 - `rawSrc`/`src` defined inside an attrset literal aren't accessible to each other — must use `let...in` for self-referencing bindings
+
+## Session: 2026-03-02 #6 — Code review cleanup (15 issues)
+Changes made:
+- **Bug fix (critical)**: `&stdout[..500]` byte-slicing in cargo.rs error path → char-boundary-safe truncation via `char_indices().nth(500)`
+- **Bug fix (high)**: `wm.starts_with(pkg_id)` for workspace member detection → exact equality `wm == pkg_id` (prevented false prefix match on e.g. `bar` matching `bar-baz`)
+- **Bug fix (high)**: String-based path manipulation in source.rs `parse_source` → proper `Path::strip_prefix()` (was missed in session #2 which fixed merge.rs)
+- **DRY (high)**: Extracted `src/run.rs` with shared `run(cli)` function — `main.rs` and `cargo_main.rs` both call it, eliminating 43 lines of duplicated orchestration logic
+- **Error handling**: `parse_pkg_id` now returns `Result` instead of `("unknown", "0.0.0")` sentinel — malformed pkg_ids produce clear errors instead of silent corruption
+- **Error handling**: Warning log when both `parse_source` and `infer_source_from_pkg_id` return `None` for non-local deps
+- **Error handling**: Bounds-checked index access on `unit_graph.units[dep.index]` in `collect_dependencies` — panics now include dep index, array length, and pkg_id context
+- **Error handling**: Bounds-checked roots index access in merge()
+- **Error handling**: `fetch-source.nix` git fallback now emits `builtins.trace` warning when using `builtins.fetchGit` (no sha256)
+- **Consistency**: `collect_build_dependencies` now deduplicates with `HashSet` (matching `collect_dependencies`)
+- **Dead code**: Removed unreachable `split('#').next().unwrap_or("")` in `parse_pkg_id` — reused existing `prefix` binding from `rsplit_once('#')`
+- **Nix**: Template `flake.nix` now uses `flake-utils.lib.eachDefaultSystem` instead of hardcoded `x86_64-linux`
+- **Nix**: `rootCrate` in `build-from-unit-graph.nix` now has a comment explaining it only exposes the first root
+- **Tests**: Added `parse_pkg_id_malformed_no_hash` test
+- **Verification**: `cargo test` 20/20 pass, `cargo clippy` 0 warnings, `nix build` + `nix flake check` (7 checks) all pass
+
+Lessons:
+- Must `git add` new files (run.rs) before `nix build` — cleanSourceFilter excludes untracked
+- `str::char_indices().nth(n)` is the safe way to truncate a string by character count
 
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON

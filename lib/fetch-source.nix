@@ -71,10 +71,12 @@ else if sourceType == "git" then
           fetchSubmodules = true;
         }
       else
-        builtins.fetchGit {
-          url = source.url;
-          rev = source.rev;
-        };
+        builtins.trace
+          "unit2nix: git dep ${crateInfo.crateName} has no sha256; using builtins.fetchGit (requires --impure or add sha256 via nix-prefetch-git)"
+          builtins.fetchGit {
+            url = source.url;
+            rev = source.rev;
+          };
     subDir = source.subDir or null;
   in
   if subDir != null then repo + "/${subDir}" else repo

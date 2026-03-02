@@ -187,6 +187,9 @@ assert _stalenessCheck;
     }
   ) (resolved.workspaceMembers or { });
 
+  # Convenience accessor for single-crate projects. For multi-root workspaces
+  # (e.g., `--package a --package b`), only the first root is exposed here.
+  # Use `workspaceMembers` to access all members by name.
   rootCrate =
     let
       roots = resolved.roots or [ ];

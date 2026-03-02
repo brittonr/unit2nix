@@ -51,16 +51,13 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             // Local path dependency — compute relative path from workspace root
             let manifest = std::path::Path::new(manifest_path);
             let crate_dir = manifest.parent().unwrap_or(std::path::Path::new("."));
-            let crate_dir_str = crate_dir.to_string_lossy().into_owned();
-            let ws = workspace_root.trim_end_matches('/');
-            let rel = crate_dir_str
+            let ws = std::path::Path::new(workspace_root);
+            let rel = crate_dir
                 .strip_prefix(ws)
-                .map(|s| s.strip_prefix('/').unwrap_or(s))
-                .unwrap_or(&crate_dir_str);
-            let path = if rel.is_empty() { "." } else { rel };
-            Ok(Some(NixSource::Local {
-                path: path.to_string(),
-            }))
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| crate_dir.to_string_lossy().into_owned());
+            let path = if rel.is_empty() { ".".to_string() } else { rel };
+            Ok(Some(NixSource::Local { path }))
         }
         Some(s) if s.starts_with("registry+") => {
             // Extract registry URL for non-crates.io registries

@@ -35,7 +35,8 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
         if stdout.is_empty() {
             bail!("{} failed:\n{}", description, stderr);
         } else {
-            let preview = &stdout[..stdout.len().min(500)];
+            let end = stdout.char_indices().nth(500).map_or(stdout.len(), |(i, _)| i);
+            let preview = &stdout[..end];
             bail!("{} failed:\nstderr: {}\nstdout (truncated): {}", description, stderr, preview);
         }
     }

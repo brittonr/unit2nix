@@ -14,24 +14,25 @@ use crate::source::{parse_source, infer_source_from_pkg_id};
 /// - `registry+...#name@version` → `(name, version)`
 /// - `path+file:///.../<name>#version` → `(name, version)`
 /// - `git+...#name@version` → `(name, version)`
-///
-/// Returns `("unknown", "0.0.0")` for malformed inputs.
-pub(crate) fn parse_pkg_id(pkg_id: &str) -> (String, String) {
-    if let Some((_prefix, fragment)) = pkg_id.rsplit_once('#') {
-        if let Some((name, version)) = fragment.rsplit_once('@') {
-            return (name.to_string(), version.to_string());
-        }
-        // path deps: fragment is just the version, name is in the path
-        // e.g., path+file:///home/user/proj/crates/foo#0.1.0
-        let path_part = pkg_id.split('#').next().unwrap_or("");
-        let name = path_part
-            .rsplit('/')
-            .next()
-            .unwrap_or("unknown")
-            .to_string();
-        return (name, fragment.to_string());
+pub(crate) fn parse_pkg_id(pkg_id: &str) -> Result<(String, String)> {
+    let (prefix, fragment) = pkg_id
+        .rsplit_once('#')
+        .ok_or_else(|| anyhow::anyhow!("malformed package ID (no '#' separator): {pkg_id}"))?;
+
+    if let Some((name, version)) = fragment.rsplit_once('@') {
+        return Ok((name.to_string(), version.to_string()));
     }
-    ("unknown".to_string(), "0.0.0".to_string())
+
+    // path deps: fragment is just the version, name is in the path
+    // e.g., path+file:///home/user/proj/crates/foo#0.1.0
+    let name = prefix
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("malformed package ID (no crate name): {pkg_id}"))?
+        .to_string();
+
+    Ok((name, fragment.to_string()))
 }
 
 /// Merge cargo unit-graph, metadata, and lockfile into a Nix build plan.
@@ -110,7 +111,7 @@ pub fn merge(
         };
 
         let (_, primary) = primary_unit;
-        let (crate_name, version) = parse_pkg_id(pkg_id);
+        let (crate_name, version) = parse_pkg_id(pkg_id)?;
 
         let meta_pkg = meta_by_id.get(pkg_id);
 
@@ -140,6 +141,12 @@ pub fn merge(
         } else {
             infer_source_from_pkg_id(pkg_id)
         };
+
+        if source.is_none() && !pkg_id.starts_with("path+") {
+            eprintln!(
+                "warning: could not determine source for {crate_name} ({pkg_id}), treating as local"
+            );
+        }
 
         // Crate root directory (from manifest_path, strip Cargo.toml)
         let crate_root = meta_pkg
@@ -171,7 +178,7 @@ pub fn merge(
         let is_workspace_member = metadata
             .workspace_members
             .iter()
-            .any(|wm| wm.starts_with(pkg_id));
+            .any(|wm| wm == pkg_id);
         let crate_bin: Vec<NixBinTarget> = if is_workspace_member {
             bin_units
                 .iter()
@@ -237,7 +244,13 @@ pub fn merge(
     let roots: Vec<String> = unit_graph
         .roots
         .iter()
-        .map(|&idx| unit_graph.units[idx].pkg_id.clone())
+        .map(|&idx| {
+            unit_graph.units.get(idx)
+                .unwrap_or_else(|| panic!(
+                    "root index {idx} out of range (len {})", unit_graph.units.len(),
+                ))
+                .pkg_id.clone()
+        })
         .collect();
 
     // Workspace members: map name → package ID for members present in the build plan.
@@ -307,18 +320,23 @@ fn collect_dependencies(
 
     for (_, u) in buildable_units {
         for dep in &u.dependencies {
-            let dep_unit = &unit_graph.units[dep.index];
+            let dep_unit = unit_graph.units.get(dep.index)
+                .unwrap_or_else(|| panic!(
+                    "dependency index {} out of range (len {}) for {pkg_id}",
+                    dep.index, unit_graph.units.len(),
+                ));
+            let dep_pkg_id = unit_pkg_ids[dep.index];
             // Skip self-references (bin → lib within same package)
-            if unit_pkg_ids[dep.index] == pkg_id {
+            if dep_pkg_id == pkg_id {
                 continue;
             }
             if dep_unit.mode == UnitMode::RunCustomBuild {
                 continue;
             }
-            let key = (unit_pkg_ids[dep.index], dep.extern_crate_name.as_str());
+            let key = (dep_pkg_id, dep.extern_crate_name.as_str());
             if seen.insert(key) {
                 deps.push(NixDep {
-                    package_id: unit_pkg_ids[dep.index].to_string(),
+                    package_id: dep_pkg_id.to_string(),
                     extern_crate_name: dep.extern_crate_name.clone(),
                 });
             }
@@ -327,19 +345,28 @@ fn collect_dependencies(
     deps
 }
 
-/// Collect build dependencies from the custom-build (build.rs) unit.
+/// Collect deduplicated build dependencies from the custom-build (build.rs) unit.
 fn collect_build_dependencies(
     build_script_unit: Option<&(usize, &Unit)>,
     unit_pkg_ids: &[&str],
 ) -> Vec<NixDep> {
+    let mut seen = HashSet::new();
     build_script_unit
         .map(|(_, bs_unit)| {
             bs_unit
                 .dependencies
                 .iter()
-                .map(|dep| NixDep {
-                    package_id: unit_pkg_ids[dep.index].to_string(),
-                    extern_crate_name: dep.extern_crate_name.clone(),
+                .filter_map(|dep| {
+                    let dep_pkg_id = unit_pkg_ids[dep.index];
+                    let key = (dep_pkg_id, dep.extern_crate_name.as_str());
+                    if seen.insert(key) {
+                        Some(NixDep {
+                            package_id: dep_pkg_id.to_string(),
+                            extern_crate_name: dep.extern_crate_name.clone(),
+                        })
+                    } else {
+                        None
+                    }
                 })
                 .collect()
         })
@@ -378,7 +405,8 @@ mod tests {
     #[test]
     fn parse_registry_pkg_id() {
         let (name, version) =
-            parse_pkg_id("registry+https://github.com/rust-lang/crates.io-index#serde@1.0.200");
+            parse_pkg_id("registry+https://github.com/rust-lang/crates.io-index#serde@1.0.200")
+                .unwrap();
         assert_eq!(name, "serde");
         assert_eq!(version, "1.0.200");
     }
@@ -386,7 +414,7 @@ mod tests {
     #[test]
     fn parse_path_pkg_id() {
         let (name, version) =
-            parse_pkg_id("path+file:///home/user/project/crates/aspen-core#0.1.0");
+            parse_pkg_id("path+file:///home/user/project/crates/aspen-core#0.1.0").unwrap();
         assert_eq!(name, "aspen-core");
         assert_eq!(version, "0.1.0");
     }
@@ -394,8 +422,15 @@ mod tests {
     #[test]
     fn parse_git_pkg_id() {
         let (name, version) =
-            parse_pkg_id("git+https://github.com/example/repo.git?rev=abc123#my-crate@0.5.0");
+            parse_pkg_id("git+https://github.com/example/repo.git?rev=abc123#my-crate@0.5.0")
+                .unwrap();
         assert_eq!(name, "my-crate");
         assert_eq!(version, "0.5.0");
+    }
+
+    #[test]
+    fn parse_pkg_id_malformed_no_hash() {
+        let result = parse_pkg_id("garbage-with-no-hash");
+        assert!(result.is_err(), "should error on malformed pkg_id");
     }
 }
