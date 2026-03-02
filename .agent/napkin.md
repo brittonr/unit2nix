@@ -94,6 +94,21 @@ Changes made:
 - **Validation**: bat (168 crates) builds successfully with -sys crate overrides (libgit2-sys, libz-sys)
 - **Archive**: Moved completed OpenSpec changes to archive/
 
+## Session: 2026-03-02 #5 — Git dep handling in auto mode, Aspen validation
+Changes made:
+- **workspaceDir param**: `auto.nix` + flake.nix support `workspaceDir` for projects with external path deps (`../sibling`)
+- **Git dep strategy**: vendor.nix no longer puts git deps in linkFarm (cargo's directory vendor format can't handle workspace inheritance like `rust-version.workspace = true`)
+- **Fake git wrapper**: auto.nix provides a shell script that intercepts `git clone`/`fetch` and serves from pre-fetched nix store paths; cargo uses it via `net.git-fetch-with-cli = true`
+- **fetchgit leaveDotGit**: git deps with sha256 in crate-hashes.json use `fetchgit { leaveDotGit = true; }` to preserve `.git` for the wrapper
+- **Clear error for missing hashes**: git deps without crate-hashes.json entry get `builtins.throw` with exact instructions
+- **Aspen validated**: 1,359 crates, 5 git deps (snix, iroh-experiments, iroh-proxy-utils, mad-turmoil, wu-manber), external path dep (aspen-wasm-plugin) — full auto build succeeded
+
+Lessons:
+- `builtins.fetchGit` strips `.git` — can't use the result as a git remote. Must use `fetchgit { leaveDotGit = true; }` which requires sha256
+- Cargo's git cache dir names use SipHash of canonical URL — impossible to replicate in pure Nix. Intercepting git CLI is simpler
+- `cp -r ${src} source` loses parent context — `workspaceDir` param lets auto.nix copy the full parent tree and find Cargo.toml at the right relative path
+- `rawSrc`/`src` defined inside an attrset literal aren't accessible to each other — must use `let...in` for self-referencing bindings
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix
