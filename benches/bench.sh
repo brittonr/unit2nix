@@ -49,6 +49,17 @@ NIX_CRATE2NIX_JSON="
   }).allWorkspaceMembers
 "
 
+NIX_UNIT2NIX_AUTO="
+  let
+    pkgs = import <nixpkgs> {};
+    ws = import $ROOT/lib/auto.nix {
+      inherit pkgs;
+      src = $ROOT/sample_workspace;
+      unit2nix = import $ROOT/benches/unit2nix-package.nix { inherit pkgs; root = $ROOT; };
+    };
+  in ws.allWorkspaceMembers
+"
+
 NIX_CRANE="import $ROOT/benches/crane.nix { pkgs = import <nixpkgs> {}; }"
 
 NIX_BRP="import $ROOT/benches/buildRustPackage.nix { pkgs = import <nixpkgs> {}; }"
@@ -80,6 +91,8 @@ hyperfine \
   --export-markdown "$RESULTS/eval.md" \
   --command-name "unit2nix (15 per-crate drvs)" \
   "nix-instantiate --quiet --expr '$NIX_UNIT2NIX' >/dev/null 2>&1" \
+  --command-name "unit2nix auto/IFD (15 per-crate drvs)" \
+  "nix-instantiate --quiet --expr '$NIX_UNIT2NIX_AUTO' >/dev/null 2>&1" \
   --command-name "crate2nix (16 per-crate drvs)" \
   "nix-instantiate --quiet --expr '$NIX_CRATE2NIX' >/dev/null 2>&1" \
   --command-name "crate2nix --format json (15 per-crate drvs)" \
@@ -99,6 +112,7 @@ echo "━━━ Full build (nix-build, cold) ━━━"
 echo "  Cleaning previous builds..."
 for expr in \
   "$NIX_UNIT2NIX" \
+  "$NIX_UNIT2NIX_AUTO" \
   "$NIX_CRATE2NIX" \
   "($NIX_CRANE).sample-bin" \
   "($NIX_BRP).sample-bin" \
@@ -111,6 +125,7 @@ done
 echo ""
 for label_expr in \
   "unit2nix:$NIX_UNIT2NIX" \
+  "unit2nix-auto:$NIX_UNIT2NIX_AUTO" \
   "crate2nix:$NIX_CRATE2NIX" \
   "crate2nix-json:$NIX_CRATE2NIX_JSON" \
   "crane:($NIX_CRANE).sample-bin" \
@@ -128,8 +143,9 @@ echo ""
 echo "━━━ Incremental rebuild (touch sample-lib, rebuild) ━━━"
 
 # Pre-build everything so caches are warm
-echo "  Pre-building all five..."
+echo "  Pre-building all six..."
 nix-build --no-out-link --expr "$NIX_UNIT2NIX" >/dev/null 2>&1
+nix-build --no-out-link --expr "$NIX_UNIT2NIX_AUTO" >/dev/null 2>&1
 nix-build --no-out-link --expr "$NIX_CRATE2NIX" >/dev/null 2>&1
 nix-build --no-out-link --expr "$NIX_CRATE2NIX_JSON" >/dev/null 2>&1
 nix-build --no-out-link --expr "($NIX_CRANE).sample-bin" >/dev/null 2>&1
@@ -161,6 +177,17 @@ NIX_U2N_MOD="
       inherit pkgs;
       src = $MODIFIED;
       resolvedJson = $MODIFIED/build-plan.json;
+    };
+  in ws.allWorkspaceMembers
+"
+
+NIX_U2N_AUTO_MOD="
+  let
+    pkgs = import <nixpkgs> {};
+    ws = import $ROOT/lib/auto.nix {
+      inherit pkgs;
+      src = $MODIFIED;
+      unit2nix = import $ROOT/benches/unit2nix-package.nix { inherit pkgs; root = $ROOT; };
     };
   in ws.allWorkspaceMembers
 "
@@ -202,6 +229,11 @@ pkgs.rustPlatform.buildRustPackage {
 }
 NIXEOF
 
+# NOTE: unit2nix auto/IFD is excluded from incremental benchmarks because the
+# IFD plan derivation hash changes on every source edit, causing a full plan
+# regeneration (~30ms) + rebuild. The incremental delta is the same (2 crates)
+# but the IFD overhead makes hyperfine comparisons misleading.
+
 echo ""
 hyperfine \
   --warmup 1 \
@@ -225,6 +257,7 @@ hyperfine \
 echo ""
 echo "━━━ No-op rebuild (everything cached) ━━━"
 nix-build --no-out-link --expr "$NIX_UNIT2NIX" >/dev/null 2>&1
+nix-build --no-out-link --expr "$NIX_UNIT2NIX_AUTO" >/dev/null 2>&1
 nix-build --no-out-link --expr "$NIX_CRATE2NIX" >/dev/null 2>&1
 nix-build --no-out-link --expr "$NIX_CRATE2NIX_JSON" >/dev/null 2>&1
 nix-build --no-out-link --expr "($NIX_CRANE).sample-bin" >/dev/null 2>&1
@@ -237,6 +270,8 @@ hyperfine \
   --export-markdown "$RESULTS/noop.md" \
   --command-name "unit2nix (15 cached drvs)" \
   "nix-build --no-out-link --expr '$NIX_UNIT2NIX' >/dev/null 2>&1" \
+  --command-name "unit2nix auto/IFD (15 cached drvs)" \
+  "nix-build --no-out-link --expr '$NIX_UNIT2NIX_AUTO' >/dev/null 2>&1" \
   --command-name "crate2nix (16 cached drvs)" \
   "nix-build --no-out-link --expr '$NIX_CRATE2NIX' >/dev/null 2>&1" \
   --command-name "crate2nix --format json (15 cached drvs)" \
@@ -252,25 +287,28 @@ hyperfine \
 echo ""
 echo "━━━ Derivation graph sizes ━━━"
 U2N_DRV=$(nix-instantiate --quiet --expr "$NIX_UNIT2NIX" 2>/dev/null)
+U2N_A_DRV=$(nix-instantiate --quiet --expr "$NIX_UNIT2NIX_AUTO" 2>/dev/null)
 C2N_DRV=$(nix-instantiate --quiet --expr "$NIX_CRATE2NIX" 2>/dev/null)
 C2N_J_DRV=$(nix-instantiate --quiet --expr "$NIX_CRATE2NIX_JSON" 2>/dev/null)
 CRANE_DRV=$(nix-instantiate --quiet --expr "($NIX_CRANE).sample-bin" 2>/dev/null)
 BRP_DRV=$(nix-instantiate --quiet --expr "($NIX_BRP).sample-bin" 2>/dev/null)
 
 U2N_RUST=$(nix-store -qR "$U2N_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
+U2N_A_RUST=$(nix-store -qR "$U2N_A_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
 C2N_RUST=$(nix-store -qR "$C2N_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
 C2N_J_RUST=$(nix-store -qR "$C2N_J_DRV" 2>/dev/null | grep -c "rust_.*\.drv$")
 U2N_TOTAL=$(nix-store -qR "$U2N_DRV" 2>/dev/null | grep -c '\.drv$')
+U2N_A_TOTAL=$(nix-store -qR "$U2N_A_DRV" 2>/dev/null | grep -c '\.drv$')
 C2N_TOTAL=$(nix-store -qR "$C2N_DRV" 2>/dev/null | grep -c '\.drv$')
 C2N_J_TOTAL=$(nix-store -qR "$C2N_J_DRV" 2>/dev/null | grep -c '\.drv$')
 CRANE_TOTAL=$(nix-store -qR "$CRANE_DRV" 2>/dev/null | grep -c '\.drv$')
 BRP_TOTAL=$(nix-store -qR "$BRP_DRV" 2>/dev/null | grep -c '\.drv$')
 
 echo ""
-echo "| Metric | unit2nix | crate2nix | crate2nix --format json | crane | buildRustPackage |"
-echo "|--------|----------|-----------|-------------------------|-------|------------------|"
-echo "| Rust crate derivations | $U2N_RUST | $C2N_RUST | $C2N_J_RUST | 2 (deps + src) | 1 |"
-echo "| Total derivation graph | $U2N_TOTAL | $C2N_TOTAL | $C2N_J_TOTAL | $CRANE_TOTAL | $BRP_TOTAL |"
+echo "| Metric | unit2nix | unit2nix auto | crate2nix | crate2nix json | crane | buildRustPackage |"
+echo "|--------|----------|---------------|-----------|----------------|-------|------------------|"
+echo "| Rust crate derivations | $U2N_RUST | $U2N_A_RUST | $C2N_RUST | $C2N_J_RUST | 2 (deps + src) | 1 |"
+echo "| Total derivation graph | $U2N_TOTAL | $U2N_A_TOTAL | $C2N_TOTAL | $C2N_J_TOTAL | $CRANE_TOTAL | $BRP_TOTAL |"
 
 # ===================================================================
 # SUMMARY
