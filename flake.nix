@@ -58,6 +58,7 @@
           {
             pkgs ? nixpkgs.legacyPackages.${system},
             src,
+            workspaceDir ? null,
             buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
             defaultCrateOverrides ? pkgs.defaultCrateOverrides,
           }:
@@ -65,6 +66,7 @@
             inherit
               pkgs
               src
+              workspaceDir
               buildRustCrateForPkgs
               defaultCrateOverrides
               ;

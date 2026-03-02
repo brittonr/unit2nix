@@ -76,7 +76,11 @@ let
     path = unpackCrate pkg;
   }) (packagesByType."crates-io" or [ ]);
 
-  # --- git source fetching ---
+  # --- git source handling ---
+  #
+  # Git deps are NOT vendored into the linkFarm directory (cargo's directory
+  # vendor format can't handle workspace inheritance like `rust-version.workspace = true`).
+  # Instead, we fetch whole repos and expose them for CARGO_HOME/git/ cache population.
 
   parseGitSource = source:
     let
@@ -111,89 +115,83 @@ let
 
   toPackageId = pkg: "${pkg.name} ${pkg.version} (${pkg.source})";
 
-  fetchGitDep = pkg:
+  # Group git packages by repo (same URL + rev), fetch each repo once.
+  gitRepoKey = pkg:
+    let parsed = parseGitSource pkg.source;
+    in "${parsed.url}#${
+      if parsed.fragment != null then parsed.fragment
+      else parsed.rev or ""
+    }";
+
+  gitRepoPkgs = packagesByType."git" or [ ];
+  gitRepoGroups = lib.groupBy gitRepoKey gitRepoPkgs;
+
+  fetchGitRepo = representativePkg:
     let
-      parsed = parseGitSource pkg.source;
-      hashKey = toHashKey pkg;
-      packageId = toPackageId pkg;
+      parsed = parseGitSource representativePkg.source;
+      hashKey = toHashKey representativePkg;
+      packageId = toPackageId representativePkg;
       sha256 = crateHashes.${hashKey} or crateHashes.${packageId} or null;
 
       rev =
         if parsed.fragment != null then parsed.fragment
-        else parsed.rev or (builtins.throw "git dep ${pkg.name} has no rev");
+        else parsed.rev or (builtins.throw "git dep ${representativePkg.name} has no rev");
 
-      repo =
+      # For the auto-build git wrapper, we need actual git repos (with .git).
+      # fetchgit with leaveDotGit preserves it. Without a known sha256, we
+      # can't use fetchgit, so git deps without hashes in crate-hashes.json
+      # will cause a build failure with a clear error message.
+      src =
         if sha256 != null then
           pkgs.fetchgit {
             inherit sha256;
             inherit (parsed) url;
             inherit rev;
             fetchSubmodules = true;
+            leaveDotGit = true;
           }
         else
-          builtins.fetchGit {
-            inherit (parsed) url;
-            inherit rev;
-            submodules = true;
-          };
+          builtins.throw ''
+            unit2nix auto mode: git dependency "${representativePkg.name}" from ${parsed.url}
+            requires a SHA256 hash in crate-hashes.json.
 
-      # Find the right subdirectory for this crate within the git repo
-      allCargoTomls = lib.filter
-        (lib.hasSuffix "Cargo.toml")
-        (lib.filesystem.listFilesRecursive repo);
+            Add the following to crate-hashes.json in your workspace root:
+              { "${toHashKey representativePkg}": "<sha256>" }
 
-      getCrateName = path:
-        let toml = builtins.fromTOML (builtins.readFile path);
-        in toml.package.name or null;
-
-      matchingToml = builtins.head (
-        builtins.filter (p: getCrateName p == pkg.name) allCargoTomls
-      );
-
-      crateDir = lib.removeSuffix "Cargo.toml" matchingToml;
+            To get the hash, run:
+              nix-prefetch-git --url ${parsed.url} --rev ${rev} | jq -r .sha256
+          '';
     in
-    pkgs.runCommand "${pkg.name}-${pkg.version}" { } ''
-      mkdir -p $out
-      cp -a ${crateDir}* $out/ 2>/dev/null || cp -a ${crateDir}. $out/
-      echo '{"package":null,"files":{}}' > $out/.cargo-checksum.json
-    '';
+    {
+      inherit rev src;
+      inherit (parsed) url;
+    };
 
-  gitSources = map (pkg: {
-    name = "${pkg.name}-${pkg.version}";
-    path = fetchGitDep pkg;
-  }) (packagesByType."git" or [ ]);
+  # Fetched git repos: { "url#rev" = { src, url, rev }; }
+  gitRepos = lib.mapAttrs (_: group: fetchGitRepo (builtins.head group)) gitRepoGroups;
+
+  # Git repos are NOT put in the vendor linkFarm. Instead, auto.nix populates
+  # CARGO_HOME/git/checkouts/ so cargo finds them without network access.
+  # We export the repo list for auto.nix to consume.
+  gitCheckouts = lib.mapAttrsToList (_: repo: repo) gitRepos;
+
+  gitSources = [];
 
   # --- vendor directory + config ---
 
   vendoredSources = pkgs.linkFarm "cargo-vendor" (cratesIoSources ++ gitSources);
 
-  # Generate cargo config that redirects all sources to vendored dir
-  gitSourceConfigs =
-    let
-      gitPkgs = packagesByType."git" or [ ];
-      uniqueSources = lib.unique (map (p: p.source) gitPkgs);
-      mkConfig = source:
-        let parsed = parseGitSource source;
-        in ''
-
-          [source."${lib.removePrefix "git+" source}"]
-          git = "${parsed.url}"
-          ${lib.optionalString (parsed ? rev) ''rev = "${parsed.rev}"''}
-          ${lib.optionalString (parsed ? tag) ''tag = "${parsed.tag}"''}
-          ${lib.optionalString (parsed ? branch) ''branch = "${parsed.branch}"''}
-          replace-with = "vendored-sources"
-        '';
-    in
-    lib.concatMapStrings mkConfig uniqueSources;
-
+  # Generate cargo config.
+  # crates-io deps are redirected to the vendor directory.
+  # Git deps are NOT redirected — they're handled via CARGO_HOME/git/ cache.
   cargoConfig = pkgs.writeText "cargo-vendor-config" ''
     [source.crates-io]
     replace-with = "vendored-sources"
-    ${gitSourceConfigs}
+
     [source.vendored-sources]
     directory = "${vendoredSources}"
   '';
 
 in {
-  inherit vendoredSources cargoConfig;
+  inherit vendoredSources cargoConfig gitCheckouts;
 }
