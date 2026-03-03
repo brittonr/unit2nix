@@ -3,10 +3,10 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-use crate::unit_graph::{UnitGraph, UnitMode, Unit};
-use crate::metadata::{CargoMetadata, CargoLock, MetadataPackage};
-use crate::output::{NixBuildPlan, NixCrate, NixDep, NixBinTarget, BUILD_PLAN_VERSION};
-use crate::source::{parse_source, infer_source_from_pkg_id};
+use crate::metadata::{CargoLock, CargoMetadata, MetadataPackage};
+use crate::output::{NixBuildPlan, NixBinTarget, NixCrate, NixDep, NixSource, BUILD_PLAN_VERSION};
+use crate::source::{infer_source_from_pkg_id, parse_source};
+use crate::unit_graph::{Unit, UnitGraph, UnitMode};
 
 /// Extract `(crate_name, version)` from a package ID string.
 ///
@@ -34,6 +34,194 @@ pub(crate) fn parse_pkg_id(pkg_id: &str) -> Result<(String, String)> {
 
     Ok((name, fragment.to_string()))
 }
+
+// ---------------------------------------------------------------------------
+// Shared helpers for NixCrate construction
+// ---------------------------------------------------------------------------
+
+/// Make an absolute path relative to a crate root directory.
+fn make_relative(abs_path: &str, crate_root: &Path) -> String {
+    Path::new(abs_path)
+        .strip_prefix(crate_root)
+        .map_or_else(
+            |_| abs_path.to_string(),
+            |p| p.to_string_lossy().into_owned(),
+        )
+}
+
+/// Sanitize a string for safe use in bash `export` statements.
+///
+/// `buildRustCrate` exports `CARGO_PKG_*` env vars via bash using
+/// `export CARGO_PKG_DESCRIPTION="..."`, so newlines and embedded
+/// double-quotes break the export.
+fn sanitize_metadata(s: &str) -> String {
+    s.replace(['\n', '\r'], " ").replace('"', "'")
+}
+
+/// Resolve source info for a crate, preferring metadata over `pkg_id` inference.
+fn resolve_source(
+    pkg_id: &str,
+    crate_name: &str,
+    meta_pkg: Option<&MetadataPackage>,
+    workspace_root: &str,
+) -> Option<NixSource> {
+    let source = if let Some(m) = meta_pkg {
+        match parse_source(m.source.as_deref(), &m.manifest_path, workspace_root) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("warning: {e:#} for {crate_name}, falling back to pkg_id inference");
+                infer_source_from_pkg_id(pkg_id)
+            }
+        }
+    } else {
+        infer_source_from_pkg_id(pkg_id)
+    };
+
+    if source.is_none() && !pkg_id.starts_with("path+") {
+        eprintln!(
+            "warning: could not determine source for {crate_name} ({pkg_id}), treating as local"
+        );
+    }
+
+    source
+}
+
+/// Build a `NixCrate` from a set of unit graph units for a package.
+///
+/// Returns `Ok(Some(crate))` on success, `Ok(None)` if the package has no
+/// buildable target (should be skipped), or `Err` on parse failures.
+#[allow(clippy::too_many_arguments)]
+fn build_nix_crate(
+    pkg_id: &str,
+    units: &[(usize, &Unit)],
+    unit_graph: &UnitGraph,
+    unit_pkg_ids: &[&str],
+    meta_pkg: Option<&MetadataPackage>,
+    checksums: &BTreeMap<(&str, &str), &str>,
+    workspace_root: &str,
+    include_bins: bool,
+) -> Result<Option<NixCrate>> {
+    // Find the primary lib unit (prefer lib over proc-macro)
+    let lib_unit = units
+        .iter()
+        .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_lib())
+        .or_else(|| {
+            units
+                .iter()
+                .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_proc_macro())
+        });
+
+    let bin_units: Vec<&(usize, &Unit)> = units
+        .iter()
+        .filter(|(_, u)| u.mode == UnitMode::Build && u.target.has_bin())
+        .collect();
+
+    let build_script_unit = units
+        .iter()
+        .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_custom_build());
+
+    // Skip packages with no buildable target (run-custom-build only, etc.)
+    let Some((_, primary)) = lib_unit.or_else(|| bin_units.first().copied()) else {
+        eprintln!("warning: skipping {pkg_id}: no lib/bin/proc-macro target");
+        return Ok(None);
+    };
+
+    let (crate_name, version) = parse_pkg_id(pkg_id)?;
+
+    let features = collect_features(units);
+    let proc_macro = primary.target.has_proc_macro();
+    let dependencies = collect_dependencies(units, unit_graph, unit_pkg_ids, pkg_id);
+    let build_dependencies = collect_build_dependencies(build_script_unit, unit_pkg_ids);
+
+    let sha256 = checksums
+        .get(&(crate_name.as_str(), version.as_str()))
+        .map(std::string::ToString::to_string);
+
+    let source = resolve_source(pkg_id, &crate_name, meta_pkg, workspace_root);
+
+    // Crate root directory (from manifest_path, strip Cargo.toml)
+    let crate_root = meta_pkg
+        .and_then(|m| Path::new(&m.manifest_path).parent())
+        .unwrap_or(Path::new(""));
+
+    let lib_path = lib_unit
+        .map(|(_, lu)| make_relative(&lu.target.src_path, crate_root))
+        .filter(|p| p != "src/lib.rs");
+
+    let lib_name = lib_unit.and_then(|(_, lu)| {
+        let n = lu.target.name.replace('-', "_");
+        if n == crate_name.replace('-', "_") {
+            None
+        } else {
+            Some(n)
+        }
+    });
+
+    let lib_crate_types = lib_unit
+        .map(|(_, lu)| lu.target.crate_types.clone())
+        .unwrap_or_default();
+
+    let crate_bin: Vec<NixBinTarget> = if include_bins {
+        bin_units
+            .iter()
+            .map(|(_, bu)| NixBinTarget {
+                name: bu.target.name.clone(),
+                path: make_relative(&bu.target.src_path, crate_root),
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let links = meta_pkg.and_then(|m| m.links.clone());
+
+    let build = build_script_unit.and_then(|(_, bs_unit)| {
+        let rel = make_relative(&bs_unit.target.src_path, crate_root);
+        if rel == "build.rs" {
+            None
+        } else {
+            Some(rel)
+        }
+    });
+
+    let authors = meta_pkg
+        .and_then(|m| m.authors.clone())
+        .unwrap_or_default();
+    let description = meta_pkg
+        .and_then(|m| m.description.clone())
+        .map(|s| sanitize_metadata(&s));
+    let homepage = meta_pkg.and_then(|m| m.homepage.clone());
+    let license = meta_pkg.and_then(|m| m.license.clone());
+    let repository = meta_pkg.and_then(|m| m.repository.clone());
+
+    Ok(Some(NixCrate {
+        crate_name,
+        version,
+        edition: primary.target.edition.clone(),
+        sha256,
+        source,
+        features,
+        dependencies,
+        build_dependencies,
+        dev_dependencies: vec![],
+        proc_macro,
+        build,
+        lib_path,
+        lib_name,
+        lib_crate_types,
+        crate_bin,
+        links,
+        authors,
+        description,
+        homepage,
+        license,
+        repository,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Core merge logic
+// ---------------------------------------------------------------------------
 
 /// Merge cargo unit-graph, metadata, and lockfile into a Nix build plan.
 ///
@@ -88,168 +276,37 @@ pub fn merge(
     let mut crates = BTreeMap::new();
 
     for (pkg_id, units) in &pkg_units {
-        // Find the primary lib unit (prefer lib over proc-macro)
-        let lib_unit = units
-            .iter()
-            .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_lib())
-            .or_else(|| {
-                units.iter().find(|(_, u)| u.mode == UnitMode::Build && u.target.has_proc_macro())
-            });
+        let meta_pkg = meta_by_id.get(pkg_id).copied();
+        let is_workspace_member = metadata.workspace_members.iter().any(|wm| wm == pkg_id);
 
-        let bin_units: Vec<&(usize, &Unit)> = units
-            .iter()
-            .filter(|(_, u)| u.mode == UnitMode::Build && u.target.has_bin())
-            .collect();
-
-        let build_script_unit = units
-            .iter()
-            .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_custom_build());
-
-        // Skip packages with no buildable target (run-custom-build only, etc.)
-        let primary_unit = lib_unit.or_else(|| bin_units.first().copied());
-        let primary_unit = match primary_unit {
-            Some(u) => u,
-            None => {
-                eprintln!("warning: skipping {pkg_id}: no lib/bin/proc-macro target");
-                continue;
-            }
+        let Some(nix_crate) = build_nix_crate(
+            pkg_id,
+            units,
+            unit_graph,
+            &unit_pkg_ids,
+            meta_pkg,
+            &checksums,
+            &metadata.workspace_root,
+            is_workspace_member,
+        )?
+        else {
+            continue;
         };
 
-        let (_, primary) = primary_unit;
-        let (crate_name, version) = parse_pkg_id(pkg_id)?;
-
-        let meta_pkg = meta_by_id.get(pkg_id);
-
-        // Features: union across all lib-like units (different feature variants
-        // may exist for the same crate; Nix builds one derivation per crate).
-        let features = collect_features(units);
-        let proc_macro = primary.target.has_proc_macro();
-        let dependencies = collect_dependencies(units, unit_graph, &unit_pkg_ids, pkg_id);
-        let build_dependencies = collect_build_dependencies(build_script_unit, &unit_pkg_ids);
-
-        // SHA256 from Cargo.lock
-        let sha256 = checksums
-            .get(&(crate_name.as_str(), version.as_str()))
-            .map(|s| s.to_string());
-
-        // Source info: prefer metadata, fall back to inferring from pkg_id.
-        // Some crates appear in the unit graph but not in cargo metadata
-        // (e.g., transitive deps pulled in by feature-specific resolution).
-        let source = if let Some(m) = meta_pkg {
-            match parse_source(m.source.as_deref(), &m.manifest_path, &metadata.workspace_root) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("warning: {e:#} for {crate_name}, falling back to pkg_id inference");
-                    infer_source_from_pkg_id(pkg_id)
-                }
-            }
-        } else {
-            infer_source_from_pkg_id(pkg_id)
-        };
-
-        if source.is_none() && !pkg_id.starts_with("path+") {
-            eprintln!(
-                "warning: could not determine source for {crate_name} ({pkg_id}), treating as local"
-            );
-        }
-
-        // Crate root directory (from manifest_path, strip Cargo.toml)
-        let crate_root = meta_pkg
-            .and_then(|m| Path::new(&m.manifest_path).parent())
-            .unwrap_or(Path::new(""));
-
-        // Make an absolute src_path relative to the crate root
-        let make_relative = |abs_path: &str| -> String {
-            Path::new(abs_path)
-                .strip_prefix(crate_root)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| abs_path.to_string())
-        };
-
-        // Lib info
-        let lib_path = lib_unit.map(|(_, lu)| make_relative(&lu.target.src_path))
-            .filter(|p| p != "src/lib.rs");
-
-        let lib_name = lib_unit.and_then(|(_, lu)| {
-            let n = lu.target.name.replace('-', "_");
-            if n == crate_name.replace('-', "_") { None } else { Some(n) }
-        });
-
-        let lib_crate_types = lib_unit
-            .map(|(_, lu)| lu.target.crate_types.clone())
-            .unwrap_or_default();
-
-        // Binary targets (only for workspace members / roots)
-        let is_workspace_member = metadata
-            .workspace_members
-            .iter()
-            .any(|wm| wm == pkg_id);
-        let crate_bin: Vec<NixBinTarget> = if is_workspace_member {
-            bin_units
-                .iter()
-                .map(|(_, bu)| NixBinTarget {
-                    name: bu.target.name.clone(),
-                    path: make_relative(&bu.target.src_path),
-                })
-                .collect()
-        } else {
-            vec![]
-        };
-
-        let links = meta_pkg.and_then(|m| m.links.clone());
-
-        // Build script path (relative to crate root, None if standard build.rs)
-        let build = build_script_unit.and_then(|(_, bs_unit)| {
-            let rel = make_relative(&bs_unit.target.src_path);
-            if rel == "build.rs" { None } else { Some(rel) }
-        });
-
-        // Package metadata for CARGO_PKG_* env vars.
-        // Sanitize strings: buildRustCrate exports these via bash using
-        // `export CARGO_PKG_DESCRIPTION="..."`, so newlines and embedded
-        // double-quotes break the export.
-        let sanitize = |s: String| {
-            s.replace(['\n', '\r'], " ")
-             .replace('"', "'")
-        };
-        let authors = meta_pkg.and_then(|m| m.authors.clone()).unwrap_or_default();
-        let description = meta_pkg.and_then(|m| m.description.clone()).map(sanitize);
-        let homepage = meta_pkg.and_then(|m| m.homepage.clone());
-        let license = meta_pkg.and_then(|m| m.license.clone());
-        let repository = meta_pkg.and_then(|m| m.repository.clone());
-
-        crates.insert(
-            pkg_id.to_string(),
-            NixCrate {
-                crate_name,
-                version,
-                edition: primary.target.edition.clone(),
-                sha256,
-                source,
-                features,
-                dependencies,
-                build_dependencies,
-                dev_dependencies: vec![],  // populated below from test graph
-                proc_macro,
-                build,
-                lib_path,
-                lib_name,
-                lib_crate_types,
-                crate_bin,
-                links,
-                authors,
-                description,
-                homepage,
-                license,
-                repository,
-            },
-        );
+        crates.insert(pkg_id.to_string(), nix_crate);
     }
 
     // Dev dependencies: compare test unit graph against build unit graph to find
     // dev-only packages and dependencies for workspace members.
     if let Some(test_graph) = test_unit_graph {
-        compute_dev_dependencies(test_graph, unit_graph, metadata, &meta_by_id, &checksums, &mut crates)?;
+        compute_dev_dependencies(
+            test_graph,
+            unit_graph,
+            metadata,
+            &meta_by_id,
+            &checksums,
+            &mut crates,
+        )?;
     }
 
     // Roots
@@ -257,11 +314,17 @@ pub fn merge(
         .roots
         .iter()
         .map(|&idx| {
-            unit_graph.units.get(idx)
-                .unwrap_or_else(|| panic!(
-                    "root index {idx} out of range (len {})", unit_graph.units.len(),
-                ))
-                .pkg_id.clone()
+            unit_graph
+                .units
+                .get(idx)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "root index {idx} out of range (len {})",
+                        unit_graph.units.len(),
+                    )
+                })
+                .pkg_id
+                .clone()
         })
         .collect();
 
@@ -288,11 +351,15 @@ pub fn merge(
         workspace_root: metadata.workspace_root.clone(),
         roots,
         workspace_members,
-        target: target.map(|s| s.to_string()),
+        target: target.map(str::to_owned),
         cargo_lock_hash,
         crates,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Dependency / feature collection helpers
+// ---------------------------------------------------------------------------
 
 /// Collect deduplicated, sorted features across all lib-like units for a package.
 ///
@@ -325,18 +392,19 @@ fn collect_dependencies(
     let mut deps = Vec::new();
     let mut seen = HashSet::new();
 
-    let buildable_units = units.iter().filter(|(_, u)| {
-        u.mode == UnitMode::Build
-            && (u.target.has_lib_like() || u.target.has_bin())
-    });
+    let buildable_units = units
+        .iter()
+        .filter(|(_, u)| u.mode == UnitMode::Build && (u.target.has_lib_like() || u.target.has_bin()));
 
     for (_, u) in buildable_units {
         for dep in &u.dependencies {
-            let dep_unit = unit_graph.units.get(dep.index)
-                .unwrap_or_else(|| panic!(
+            let dep_unit = unit_graph.units.get(dep.index).unwrap_or_else(|| {
+                panic!(
                     "dependency index {} out of range (len {}) for {pkg_id}",
-                    dep.index, unit_graph.units.len(),
-                ));
+                    dep.index,
+                    unit_graph.units.len(),
+                )
+            });
             let dep_pkg_id = unit_pkg_ids[dep.index];
             // Skip self-references (bin → lib within same package)
             if dep_pkg_id == pkg_id {
@@ -385,6 +453,68 @@ fn collect_build_dependencies(
         .unwrap_or_default()
 }
 
+// ---------------------------------------------------------------------------
+// Dev dependency computation
+// ---------------------------------------------------------------------------
+
+/// Index a unit graph into a map of `pkg_id` → set of dependency `pkg_ids`.
+///
+/// Used to build the "build graph" index for diffing against the test graph.
+fn index_build_deps(graph: &UnitGraph) -> BTreeMap<&str, HashSet<&str>> {
+    let pkg_ids: Vec<&str> = graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+    let mut deps_by_pkg: BTreeMap<&str, HashSet<&str>> = BTreeMap::new();
+    for unit in &graph.units {
+        if unit.mode != UnitMode::Build {
+            continue;
+        }
+        if !unit.target.has_lib_like() && !unit.target.has_bin() {
+            continue;
+        }
+        let entry = deps_by_pkg.entry(unit.pkg_id.as_str()).or_default();
+        for dep in &unit.dependencies {
+            let dep_pkg_id = pkg_ids[dep.index];
+            if dep_pkg_id != unit.pkg_id.as_str() {
+                entry.insert(dep_pkg_id);
+            }
+        }
+    }
+    deps_by_pkg
+}
+
+/// Index a test unit graph into a map of `pkg_id` → list of `NixDep`.
+///
+/// Includes both Build and Test mode units (dev dependencies appear on
+/// mode=test units in `cargo test --unit-graph`).
+fn index_test_deps(graph: &UnitGraph) -> (Vec<&str>, BTreeMap<&str, Vec<NixDep>>) {
+    let pkg_ids: Vec<&str> = graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+    let mut deps_by_pkg: BTreeMap<&str, Vec<NixDep>> = BTreeMap::new();
+    for unit in &graph.units {
+        match unit.mode {
+            UnitMode::Build | UnitMode::Test => {}
+            _ => continue,
+        }
+        if !unit.target.has_lib_like() && !unit.target.has_bin() {
+            continue;
+        }
+        let entry = deps_by_pkg.entry(unit.pkg_id.as_str()).or_default();
+        for dep in &unit.dependencies {
+            let dep_unit = &graph.units[dep.index];
+            let dep_pkg_id = pkg_ids[dep.index];
+            if dep_pkg_id == unit.pkg_id.as_str() {
+                continue;
+            }
+            if dep_unit.mode == UnitMode::RunCustomBuild {
+                continue;
+            }
+            entry.push(NixDep {
+                package_id: dep_pkg_id.to_string(),
+                extern_crate_name: dep.extern_crate_name.clone(),
+            });
+        }
+    }
+    (pkg_ids, deps_by_pkg)
+}
+
 /// Compute dev-only dependencies by diffing test and build unit graphs.
 ///
 /// For each workspace member, finds dependencies that exist in the test graph
@@ -398,74 +528,26 @@ fn compute_dev_dependencies(
     checksums: &BTreeMap<(&str, &str), &str>,
     crates: &mut BTreeMap<String, NixCrate>,
 ) -> Result<()> {
-    // Index build graph: pkg_id → set of dependency pkg_ids (normal deps)
-    let build_pkg_ids: Vec<&str> = build_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
-    let mut build_deps_by_pkg: BTreeMap<&str, HashSet<&str>> = BTreeMap::new();
-    for unit in &build_graph.units {
-        if unit.mode != UnitMode::Build {
-            continue;
-        }
-        if !unit.target.has_lib_like() && !unit.target.has_bin() {
-            continue;
-        }
-        let entry = build_deps_by_pkg.entry(unit.pkg_id.as_str()).or_default();
-        for dep in &unit.dependencies {
-            let dep_pkg_id = build_pkg_ids[dep.index];
-            if dep_pkg_id != unit.pkg_id.as_str() {
-                entry.insert(dep_pkg_id);
-            }
-        }
-    }
-
-    // Index test graph — include both Build and Test mode units.
-    // Dev dependencies only appear on mode=test units (lib compiled for testing),
-    // not on mode=build units.
-    let test_pkg_ids: Vec<&str> = test_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
-    let mut test_deps_by_pkg: BTreeMap<&str, Vec<NixDep>> = BTreeMap::new();
-    for unit in &test_graph.units {
-        // Include Build (normal) and Test (lib-as-test) modes.
-        // Dev dependencies appear on mode=test units in `cargo test --unit-graph`.
-        match unit.mode {
-            UnitMode::Build | UnitMode::Test => {}
-            _ => continue,
-        }
-        if !unit.target.has_lib_like() && !unit.target.has_bin() {
-            continue;
-        }
-        let entry = test_deps_by_pkg.entry(unit.pkg_id.as_str()).or_default();
-        for dep in &unit.dependencies {
-            let dep_unit = &test_graph.units[dep.index];
-            let dep_pkg_id = test_pkg_ids[dep.index];
-            if dep_pkg_id == unit.pkg_id.as_str() {
-                continue;
-            }
-            if dep_unit.mode == UnitMode::RunCustomBuild {
-                continue;
-            }
-            entry.push(NixDep {
-                package_id: dep_pkg_id.to_string(),
-                extern_crate_name: dep.extern_crate_name.clone(),
-            });
-        }
-    }
+    let build_deps_by_pkg = index_build_deps(build_graph);
+    let (test_pkg_ids, test_deps_by_pkg) = index_test_deps(test_graph);
 
     // Identify workspace member pkg_ids
     let ws_member_ids: HashSet<&str> = metadata
         .workspace_members
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
 
     // First pass: collect all pkg_ids that are dev-only (in test graph but not build plan)
     let mut dev_only_pkg_ids: BTreeSet<String> = BTreeSet::new();
-    for pkg_id in test_pkg_ids.iter() {
+    for pkg_id in &test_pkg_ids {
         if !crates.contains_key(*pkg_id) {
-            dev_only_pkg_ids.insert(pkg_id.to_string());
+            dev_only_pkg_ids.insert((*pkg_id).to_string());
         }
     }
 
-    // Add dev-only crates to the build plan (they're needed as dependencies)
-    let mut test_pkg_units: BTreeMap<&str, Vec<(usize, &crate::unit_graph::Unit)>> = BTreeMap::new();
+    // Group test graph units by pkg_id for build_nix_crate
+    let mut test_pkg_units: BTreeMap<&str, Vec<(usize, &Unit)>> = BTreeMap::new();
     for (idx, unit) in test_graph.units.iter().enumerate() {
         test_pkg_units
             .entry(unit.pkg_id.as_str())
@@ -473,109 +555,29 @@ fn compute_dev_dependencies(
             .push((idx, unit));
     }
 
+    // Add dev-only crates to the build plan (they're needed as dependencies)
     for dev_pkg_id in &dev_only_pkg_ids {
-        let (crate_name, version) = parse_pkg_id(dev_pkg_id)?;
-        let meta_pkg = meta_by_id.get(dev_pkg_id.as_str());
-
-        let sha256 = checksums
-            .get(&(crate_name.as_str(), version.as_str()))
-            .map(|s| s.to_string());
-
-        let source = if let Some(m) = meta_pkg {
-            match parse_source(m.source.as_deref(), &m.manifest_path, &metadata.workspace_root) {
-                Ok(s) => s,
-                Err(_) => infer_source_from_pkg_id(dev_pkg_id),
-            }
-        } else {
-            infer_source_from_pkg_id(dev_pkg_id)
-        };
-
-        // Collect features and deps from test graph units for this package
-        let units = test_pkg_units.get(dev_pkg_id.as_str()).cloned().unwrap_or_default();
-        let features = collect_features(&units);
-        let dependencies = collect_dependencies(&units, test_graph, &test_pkg_ids, dev_pkg_id);
-
-        let build_script_unit = units
-            .iter()
-            .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_custom_build());
-        let build_dependencies = collect_build_dependencies(build_script_unit, &test_pkg_ids);
-
-        let lib_unit = units
-            .iter()
-            .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_lib())
-            .or_else(|| units.iter().find(|(_, u)| u.mode == UnitMode::Build && u.target.has_proc_macro()));
-
-        let primary_unit = lib_unit.or_else(|| {
-            units.iter().find(|(_, u)| u.mode == UnitMode::Build && u.target.has_bin())
-        });
-        let primary = match primary_unit {
-            Some((_, u)) => u,
-            None => continue, // skip if no buildable target
-        };
-
-        let crate_root = meta_pkg
-            .and_then(|m| std::path::Path::new(&m.manifest_path).parent())
-            .unwrap_or(std::path::Path::new(""));
-
-        let make_relative = |abs_path: &str| -> String {
-            std::path::Path::new(abs_path)
-                .strip_prefix(crate_root)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| abs_path.to_string())
-        };
-
-        let lib_path = lib_unit.map(|(_, lu)| make_relative(&lu.target.src_path))
-            .filter(|p| p != "src/lib.rs");
-        let lib_name = lib_unit.and_then(|(_, lu)| {
-            let n = lu.target.name.replace('-', "_");
-            if n == crate_name.replace('-', "_") { None } else { Some(n) }
-        });
-        let lib_crate_types = lib_unit
-            .map(|(_, lu)| lu.target.crate_types.clone())
+        let meta_pkg = meta_by_id.get(dev_pkg_id.as_str()).copied();
+        let units = test_pkg_units
+            .get(dev_pkg_id.as_str())
+            .cloned()
             .unwrap_or_default();
-        let proc_macro = primary.target.has_proc_macro();
-        let links = meta_pkg.and_then(|m| m.links.clone());
-        let build = units
-            .iter()
-            .find(|(_, u)| u.mode == UnitMode::Build && u.target.has_custom_build())
-            .and_then(|(_, bs_unit)| {
-                let rel = make_relative(&bs_unit.target.src_path);
-                if rel == "build.rs" { None } else { Some(rel) }
-            });
 
-        let sanitize = |s: String| s.replace(['\n', '\r'], " ").replace('"', "'");
-        let authors = meta_pkg.and_then(|m| m.authors.clone()).unwrap_or_default();
-        let description = meta_pkg.and_then(|m| m.description.clone()).map(sanitize);
-        let homepage = meta_pkg.and_then(|m| m.homepage.clone());
-        let license = meta_pkg.and_then(|m| m.license.clone());
-        let repository = meta_pkg.and_then(|m| m.repository.clone());
+        let Some(nix_crate) = build_nix_crate(
+            dev_pkg_id,
+            &units,
+            test_graph,
+            &test_pkg_ids,
+            meta_pkg,
+            checksums,
+            &metadata.workspace_root,
+            false, // dev-only crates never include bin targets
+        )?
+        else {
+            continue;
+        };
 
-        crates.insert(
-            dev_pkg_id.to_string(),
-            NixCrate {
-                crate_name,
-                version,
-                edition: primary.target.edition.clone(),
-                sha256,
-                source,
-                features,
-                dependencies,
-                build_dependencies,
-                dev_dependencies: vec![],
-                proc_macro,
-                build,
-                lib_path,
-                lib_name,
-                lib_crate_types,
-                crate_bin: vec![],
-                links,
-                authors,
-                description,
-                homepage,
-                license,
-                repository,
-            },
-        );
+        crates.insert(dev_pkg_id.clone(), nix_crate);
     }
 
     // Second pass: compute dev-only deps for each workspace member
@@ -603,11 +605,17 @@ fn compute_dev_dependencies(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
 /// Validate that every dependency reference resolves to a crate in the plan.
 fn validate_references(crates: &BTreeMap<String, NixCrate>) -> Result<()> {
     let mut missing_refs: Vec<(String, String)> = Vec::new();
     for (pkg_id, crate_info) in crates {
-        let all_deps = crate_info.dependencies.iter()
+        let all_deps = crate_info
+            .dependencies
+            .iter()
             .chain(&crate_info.build_dependencies)
             .chain(&crate_info.dev_dependencies);
         for dep in all_deps {
@@ -619,7 +627,9 @@ fn validate_references(crates: &BTreeMap<String, NixCrate>) -> Result<()> {
     if !missing_refs.is_empty() {
         eprintln!("ERROR: {} dangling dependency references:", missing_refs.len());
         for (from, to) in &missing_refs {
-            let from_name = crates.get(from).map(|c| c.crate_name.as_str()).unwrap_or("?");
+            let from_name = crates
+                .get(from)
+                .map_or("?", |c| c.crate_name.as_str());
             eprintln!("  {from_name} ({from}) -> {to}");
         }
         bail!(

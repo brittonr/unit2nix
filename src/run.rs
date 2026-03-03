@@ -8,18 +8,18 @@ use crate::overrides;
 use crate::prefetch;
 
 /// Shared entry point for both `unit2nix` and `cargo unit2nix`.
-pub fn run(cli: Cli) -> Result<()> {
+pub fn run(cli: &Cli) -> Result<()> {
     // --check-overrides: read an existing build plan and report coverage
     if cli.check_overrides {
-        return run_check_overrides(&cli);
+        return run_check_overrides(cli);
     }
 
     eprintln!("Running cargo build --unit-graph...");
-    let unit_graph = cargo::run_unit_graph(&cli)?;
+    let unit_graph = cargo::run_unit_graph(cli)?;
     eprintln!("  {} units, {} roots", unit_graph.units.len(), unit_graph.roots.len());
 
     eprintln!("Running cargo metadata...");
-    let metadata = cargo::run_cargo_metadata(&cli)?;
+    let metadata = cargo::run_cargo_metadata(cli)?;
     eprintln!("  {} packages", metadata.packages.len());
 
     eprintln!("Reading Cargo.lock...");
@@ -28,8 +28,7 @@ pub fn run(cli: Cli) -> Result<()> {
         "  {} packages with checksums",
         lock.package
             .as_ref()
-            .map(|p| p.iter().filter(|p| p.checksum.is_some()).count())
-            .unwrap_or(0)
+            .map_or(0, |p| p.iter().filter(|p| p.checksum.is_some()).count())
     );
 
     eprintln!("Hashing Cargo.lock...");
@@ -38,7 +37,7 @@ pub fn run(cli: Cli) -> Result<()> {
 
     let test_unit_graph = if cli.include_dev {
         eprintln!("Running cargo test --unit-graph (for dev dependencies)...");
-        let tug = cargo::run_test_unit_graph(&cli)?;
+        let tug = cargo::run_test_unit_graph(cli)?;
         eprintln!("  {} units, {} roots", tug.units.len(), tug.roots.len());
         Some(tug)
     } else {

@@ -184,6 +184,32 @@ Lessons:
 - Build plan JSON needs `#[serde(default)]` on optional fields for backward-compatible deserialization of older plans
 - ring's `links` value is `ring_core_0_17_14_` (version-stamped), not `ring` — need prefix matching for knownNoOverride
 
+## Session: 2026-03-03 #4 — DRY extraction + clippy pedantic cleanup
+Changes made:
+- **DRY (major)**: Extracted `build_nix_crate()` — shared NixCrate construction helper eliminates ~60 lines of duplicated logic between `merge()` and `compute_dev_dependencies()`
+- **DRY**: Extracted `resolve_source()` — shared source resolution with warning logging
+- **DRY**: Extracted `sanitize_metadata()` — was duplicated as inline closure in both functions
+- **DRY**: Extracted `make_relative()` — was duplicated as inline closure in both functions
+- **DRY**: Extracted `index_build_deps()` and `index_test_deps()` — unit graph indexing pulled out of `compute_dev_dependencies()` to keep it under 100 lines
+- **Clippy pedantic**: Fixed all 33 warnings → 0 remaining:
+  - 10 redundant closures → method references (`CrateKind::is_lib`, `String::as_str`, `str::to_owned`, etc.)
+  - 6 doc backtick issues → backticked `NixSource`, `manifest_path`, `pkg_id`, `pkg_ids`
+  - 4 inline format vars → `format!("{description}")` style
+  - 3 `map().unwrap_or_else()` → `map_or_else()` / `map_or()`
+  - 2 `let...else` opportunities → `let Some(..) = .. else { continue }`
+  - 1 redundant else block (bail! never falls through)
+  - 1 pass-by-value not consumed → `run(cli: &Cli)` (was taking ownership unnecessarily)
+  - 1 implicit string clone → `.clone()` instead of `.to_string()` on `&String`
+  - 1 explicit iter loop → `&container` shorthand
+  - 1 excessive bools → `#[allow]` on CLI args struct (expected for clap)
+  - 1 `format!("{:x}", hash)` → `format!("{hash:x}")`
+- **Verification**: cargo test 20/20, cargo clippy 0 warnings, cargo clippy pedantic 0 warnings, nix flake check 11/11 pass
+
+Lessons:
+- When changing a function from `fn f(x: T)` to `fn f(x: &T)`, update all `&x` references inside the body to `x` to avoid double-referencing (`&&T`)
+- Explicit lifetime annotations `<'a>` on functions that take a single reference are redundant — Rust's elision rules handle it
+- `str::to_owned` is the idiomatic method reference for `|s: &str| s.to_string()`
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

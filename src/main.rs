@@ -15,5 +15,5 @@ use clap::Parser;
 use cli::Cli;
 
 fn main() -> Result<()> {
-    run::run(Cli::parse())
+    run::run(&Cli::parse())
 }

@@ -9,6 +9,7 @@ use clap::Parser;
 /// into a single JSON consumed by a thin Nix wrapper around `buildRustCrate`.
 #[derive(Parser, Debug)]
 #[command(version, about)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
     /// Path to the Cargo.toml (default: ./Cargo.toml)
     #[arg(long, default_value = "./Cargo.toml")]

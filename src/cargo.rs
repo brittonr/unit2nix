@@ -27,18 +27,20 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
     cmd.arg("--manifest-path").arg(manifest_path);
 
     let output = cmd.output()
-        .with_context(|| format!("failed to run {}", description))?;
+        .with_context(|| format!("failed to run {description}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         if stdout.is_empty() {
-            bail!("{} failed:\n{}", description, stderr);
-        } else {
-            let end = stdout.char_indices().nth(500).map_or(stdout.len(), |(i, _)| i);
-            let preview = &stdout[..end];
-            bail!("{} failed:\nstderr: {}\nstdout (truncated): {}", description, stderr, preview);
+            bail!("{description} failed:\n{stderr}");
         }
+        let end = stdout
+            .char_indices()
+            .nth(500)
+            .map_or(stdout.len(), |(i, _)| i);
+        let preview = &stdout[..end];
+        bail!("{description} failed:\nstderr: {stderr}\nstdout (truncated): {preview}");
     }
 
     Ok(output.stdout)
@@ -139,7 +141,7 @@ pub fn hash_cargo_lock(manifest_path: &Path) -> Result<String> {
     let content = std::fs::read(&lock_path)
         .with_context(|| format!("failed to read {} for hashing", lock_path.display()))?;
     let hash = Sha256::digest(&content);
-    Ok(format!("{:x}", hash))
+    Ok(format!("{hash:x}"))
 }
 
 #[cfg(test)]

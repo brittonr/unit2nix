@@ -90,17 +90,17 @@ impl CrateKind {
 impl UnitTarget {
     /// True if any kind is a library type (lib, rlib, cdylib, dylib, staticlib).
     pub fn has_lib(&self) -> bool {
-        self.kind.iter().any(|k| k.is_lib())
+        self.kind.iter().any(CrateKind::is_lib)
     }
 
     /// True if any kind is proc-macro.
     pub fn has_proc_macro(&self) -> bool {
-        self.kind.iter().any(|k| k.is_proc_macro())
+        self.kind.iter().any(CrateKind::is_proc_macro)
     }
 
     /// True if any kind is library-like or proc-macro.
     pub fn has_lib_like(&self) -> bool {
-        self.kind.iter().any(|k| k.is_lib_like())
+        self.kind.iter().any(CrateKind::is_lib_like)
     }
 
     /// True if any kind is bin.

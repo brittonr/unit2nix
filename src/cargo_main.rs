@@ -29,11 +29,11 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let filtered: Vec<&str> = if args.len() > 1 && args[1] == "unit2nix" {
         std::iter::once(args[0].as_str())
-            .chain(args[2..].iter().map(|s| s.as_str()))
+            .chain(args[2..].iter().map(String::as_str))
             .collect()
     } else {
-        args.iter().map(|s| s.as_str()).collect()
+        args.iter().map(String::as_str).collect()
     };
 
-    run::run(Cli::parse_from(filtered))
+    run::run(&Cli::parse_from(filtered))
 }

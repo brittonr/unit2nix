@@ -8,7 +8,7 @@ struct ParsedGitUrl {
     url: String,
     /// Value of the `?rev=` query parameter, if present.
     rev_query: Option<String>,
-    /// The fragment after `#` (commit hash in source strings, `name@version` in pkg_ids).
+    /// The fragment after `#` (commit hash in source strings, `name@version` in `pkg_ids`).
     fragment: String,
 }
 
@@ -25,7 +25,7 @@ fn parse_git_url(s: &str) -> Option<ParsedGitUrl> {
     let rev_query = query
         .split('&')
         .find_map(|param| param.strip_prefix("rev="))
-        .map(|v| v.to_string());
+        .map(str::to_owned);
 
     Some(ParsedGitUrl {
         url: base_url.to_string(),
@@ -34,15 +34,15 @@ fn parse_git_url(s: &str) -> Option<ParsedGitUrl> {
     })
 }
 
-/// Parse source string from cargo metadata into a NixSource.
+/// Parse source string from cargo metadata into a [`NixSource`].
 ///
-/// For git dependencies, computes `sub_dir` from the manifest_path relative
+/// For git dependencies, computes `sub_dir` from the `manifest_path` relative
 /// to Cargo's git checkout cache. This handles monorepo git deps where the
 /// crate lives in a subdirectory (e.g., `{ git = "...", subdirectory = "crates/foo" }`).
 /// Returns:
 /// - `Ok(Some(...))` — known source type resolved successfully.
-/// - `Ok(None)` — source field is `None` in metadata but manifest_path is empty
-///   (shouldn't happen in practice; local deps always have a manifest_path).
+/// - `Ok(None)` — source field is `None` in metadata but `manifest_path` is empty
+///   (shouldn't happen in practice; local deps always have a `manifest_path`).
 /// - `Err(...)` — unknown or malformed source type. Callers should fall back to
 ///   `infer_source_from_pkg_id` or propagate the error.
 pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str) -> Result<Option<NixSource>> {
@@ -52,10 +52,10 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             let manifest = std::path::Path::new(manifest_path);
             let crate_dir = manifest.parent().unwrap_or(std::path::Path::new("."));
             let ws = std::path::Path::new(workspace_root);
-            let rel = crate_dir
-                .strip_prefix(ws)
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| crate_dir.to_string_lossy().into_owned());
+            let rel = crate_dir.strip_prefix(ws).map_or_else(
+                |_| crate_dir.to_string_lossy().into_owned(),
+                |p| p.to_string_lossy().into_owned(),
+            );
             let path = if rel.is_empty() { ".".to_string() } else { rel };
             Ok(Some(NixSource::Local { path }))
         }
@@ -118,7 +118,7 @@ pub fn compute_git_subdir(manifest_path: &str) -> Option<String> {
 ///
 /// Some crates appear in the unit graph but not in `cargo metadata` (e.g.,
 /// transitive deps pulled in by feature-specific resolution that metadata's
-/// resolver doesn't include). The pkg_id format encodes the source:
+/// resolver doesn't include). The `pkg_id` format encodes the source:
 /// - `registry+https://...#name@version` → crates.io or alternative registry
 /// - `path+file:///...#version` → local
 /// - `git+https://...?rev=HASH#name@version` → git (rev from query param)
