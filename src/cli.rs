@@ -46,4 +46,12 @@ pub struct Cli {
     /// Reads an existing build plan JSON (from -o) and reports coverage.
     #[arg(long)]
     pub check_overrides: bool,
+
+    /// Include dev-dependencies for workspace members.
+    ///
+    /// Runs `cargo test --unit-graph` in addition to `cargo build --unit-graph`
+    /// to capture dev-only dependencies. These are emitted as `devDependencies`
+    /// on workspace members and used by the Nix consumer's `.test` output.
+    #[arg(long)]
+    pub include_dev: bool,
 }

@@ -39,6 +39,10 @@ pub struct NixCrate {
     pub features: Vec<String>,
     pub dependencies: Vec<NixDep>,
     pub build_dependencies: Vec<NixDep>,
+    /// Dev-only dependencies (only populated for workspace members when --include-dev is used).
+    /// These are deps that appear in `cargo test --unit-graph` but not `cargo build --unit-graph`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dev_dependencies: Vec<NixDep>,
     pub proc_macro: bool,
     pub build: Option<String>,
     pub lib_path: Option<String>,
@@ -89,7 +93,7 @@ pub enum NixSource {
 }
 
 /// A dependency reference in the build plan.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixDep {
     pub package_id: String,

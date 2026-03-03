@@ -33,6 +33,8 @@
   defaultCrateOverrides ? null,
   # Optional: additional crate overrides on top of defaults (forwarded to buildFromUnitGraph)
   extraCrateOverrides ? {},
+  # Optional: extra arguments passed to clippy-driver (e.g. ["-D" "warnings"])
+  clippyArgs ? [],
 }:
 
 let
@@ -178,7 +180,7 @@ let
 
 in
 import ./build-from-unit-graph.nix {
-  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides;
+  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs;
   src = workspaceSrc;
   resolvedJson = generatedPlan;
   skipStalenessCheck = true;

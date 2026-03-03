@@ -13,7 +13,7 @@
     "sample-lib": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-lib#0.1.0",
     "sample-macro": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-macro#0.1.0"
   },
-  "cargoLockHash": "25cc0bceeb4acb009d7d55b79b7e4561b594afd0040ec69e3008cc1f7a1df820",
+  "cargoLockHash": "8e58decdd1c18b95ab278e9e4162bb0ad67d6b3efbbfe5fc0b7094cc12db869c",
   "crates": {
     "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0": {
       "crateName": "sample-bin",
@@ -99,6 +99,12 @@
         }
       ],
       "buildDependencies": [],
+      "devDependencies": [
+        {
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#pretty_assertions@1.4.1",
+          "externCrateName": "pretty_assertions"
+        }
+      ],
       "procMacro": false,
       "build": null,
       "libPath": null,
@@ -130,6 +136,34 @@
       ],
       "crateBin": [],
       "links": null
+    },
+    "registry+https://github.com/rust-lang/crates.io-index#diff@0.1.13": {
+      "crateName": "diff",
+      "version": "0.1.13",
+      "edition": "2015",
+      "sha256": "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [],
+      "dependencies": [],
+      "buildDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "libCrateTypes": [
+        "lib"
+      ],
+      "crateBin": [],
+      "links": null,
+      "authors": [
+        "Utkarsh Kukreti <utkarshkukreti@gmail.com>"
+      ],
+      "description": "An LCS based slice and string diffing implementation.",
+      "homepage": "https://github.com/utkarshkukreti/diff.rs",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/utkarshkukreti/diff.rs"
     },
     "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.17": {
       "crateName": "itoa",
@@ -185,10 +219,51 @@
         "Andrew Gallant <jamslam@gmail.com>",
         "bluss"
       ],
-      "description": "Provides extremely fast (uses SIMD on x86_64, aarch64 and wasm32) routines for\n1, 2 or 3 byte search and single substring search.\n",
+      "description": "Provides extremely fast (uses SIMD on x86_64, aarch64 and wasm32) routines for 1, 2 or 3 byte search and single substring search. ",
       "homepage": "https://github.com/BurntSushi/memchr",
       "license": "Unlicense OR MIT",
       "repository": "https://github.com/BurntSushi/memchr"
+    },
+    "registry+https://github.com/rust-lang/crates.io-index#pretty_assertions@1.4.1": {
+      "crateName": "pretty_assertions",
+      "version": "1.4.1",
+      "edition": "2018",
+      "sha256": "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "dependencies": [
+        {
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#diff@0.1.13",
+          "externCrateName": "diff"
+        },
+        {
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#yansi@1.0.1",
+          "externCrateName": "yansi"
+        }
+      ],
+      "buildDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "libCrateTypes": [
+        "lib"
+      ],
+      "crateBin": [],
+      "links": null,
+      "authors": [
+        "Colin Kiegel <kiegel@gmx.de>",
+        "Florent Fayolle <florent.fayolle69@gmail.com>",
+        "Tom Milligan <code@tommilligan.net>"
+      ],
+      "description": "Overwrite `assert_eq!` and `assert_ne!` with drop-in replacements, adding colorful diffs.",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-pretty-assertions/rust-pretty-assertions"
     },
     "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106": {
       "crateName": "proc-macro2",
@@ -498,6 +573,37 @@
       "description": "Determine whether characters have the XID_Start or XID_Continue properties according to Unicode Standard Annex #31",
       "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
       "repository": "https://github.com/dtolnay/unicode-ident"
+    },
+    "registry+https://github.com/rust-lang/crates.io-index#yansi@1.0.1": {
+      "crateName": "yansi",
+      "version": "1.0.1",
+      "edition": "2021",
+      "sha256": "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "alloc",
+        "default",
+        "std"
+      ],
+      "dependencies": [],
+      "buildDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "libCrateTypes": [
+        "lib"
+      ],
+      "crateBin": [],
+      "links": null,
+      "authors": [
+        "Sergio Benitez <sb@sergio.bz>"
+      ],
+      "description": "A dead simple ANSI terminal color painting library.",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/SergioBenitez/yansi"
     },
     "registry+https://github.com/rust-lang/crates.io-index#zmij@1.0.21": {
       "crateName": "zmij",

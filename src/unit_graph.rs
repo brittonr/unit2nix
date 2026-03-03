@@ -32,6 +32,12 @@ pub enum UnitMode {
     Build,
     /// Executing a build script: runs build.rs and captures its output.
     RunCustomBuild,
+    /// Compiling a crate for testing (lib with `#[cfg(test)]`, or test harness).
+    /// Only appears in `cargo test --unit-graph`, not `cargo build --unit-graph`.
+    Test,
+    /// Running a doctest.
+    #[serde(alias = "doctest")]
+    Doctest,
     /// Forward-compatible catch-all for any future modes Cargo may add.
     #[serde(other)]
     Other,

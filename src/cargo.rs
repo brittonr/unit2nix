@@ -77,6 +77,43 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     serde_json::from_slice(&stdout).context("failed to parse unit graph JSON")
 }
 
+/// Run `cargo test --unit-graph` and parse the result.
+///
+/// Like `run_unit_graph` but uses `test` instead of `build`, which includes
+/// dev-dependencies and test targets in the unit graph.
+pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
+    let mut args: Vec<&str> = vec![
+        "test",
+        "--unit-graph",
+        "-Z",
+        "unstable-options",
+        "--locked",
+        "--no-run",
+    ];
+
+    if let Some(features) = cli.features.as_deref() {
+        args.extend_from_slice(&["--features", features]);
+    }
+    if cli.all_features {
+        args.push("--all-features");
+    }
+    if cli.no_default_features {
+        args.push("--no-default-features");
+    }
+    if let Some(bin) = cli.bin.as_deref() {
+        args.extend_from_slice(&["--bin", bin]);
+    }
+    if let Some(package) = cli.package.as_deref() {
+        args.extend_from_slice(&["--package", package]);
+    }
+    if let Some(target) = cli.target.as_deref() {
+        args.extend_from_slice(&["--target", target]);
+    }
+
+    let stdout = run_cargo(&args, &cli.manifest_path, "cargo test --unit-graph")?;
+    serde_json::from_slice(&stdout).context("failed to parse test unit graph JSON")
+}
+
 /// Run `cargo metadata` and parse the result.
 pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
     let args = ["metadata", "--format-version=1", "--locked"];

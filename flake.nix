@@ -41,6 +41,7 @@
             defaultCrateOverrides ? null,
             extraCrateOverrides ? {},
             skipStalenessCheck ? false,
+            clippyArgs ? [],
           }:
           import ./lib/build-from-unit-graph.nix {
             inherit
@@ -51,6 +52,7 @@
               defaultCrateOverrides
               extraCrateOverrides
               skipStalenessCheck
+              clippyArgs
               ;
           };
 
@@ -64,6 +66,7 @@
             buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
             defaultCrateOverrides ? null,
             extraCrateOverrides ? {},
+            clippyArgs ? [],
           }:
           import ./lib/auto.nix {
             inherit
@@ -73,6 +76,7 @@
               buildRustCrateForPkgs
               defaultCrateOverrides
               extraCrateOverrides
+              clippyArgs
               ;
             unit2nix = self.packages.${system}.unit2nix;
           };
@@ -157,6 +161,8 @@
         # Checks
         checks = {
           sample-builds = sampleWorkspace.allWorkspaceMembers;
+          sample-clippy = sampleWorkspace.clippy.allWorkspaceMembers;
+          sample-test-deps = sampleWorkspace.test.allWorkspaceMembers;
 
           # Auto mode (IFD): builds sample_workspace with no pre-generated JSON
           sample-auto = (buildFromUnitGraphAuto {

@@ -42,9 +42,10 @@ pkgs.testers.runNixOSTest {
         name, path = line.split("=", 1)
         crate_paths[name] = path
 
-    # Verify we have the expected number of crates (15 for sample workspace)
+    # Verify we have the expected number of crates (18 for sample workspace:
+    # 15 base + 3 dev-deps: diff, pretty_assertions, yansi)
     count = len(crate_paths)
-    assert count == 15, f"expected 15 crates, got {count}"
+    assert count == 18, f"expected 18 crates, got {count}"
 
     # Verify each crate has its own unique store path
     unique_paths = set(crate_paths.values())

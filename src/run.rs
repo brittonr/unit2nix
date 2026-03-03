@@ -36,8 +36,24 @@ pub fn run(cli: Cli) -> Result<()> {
     let cargo_lock_hash = cargo::hash_cargo_lock(&cli.manifest_path)?;
     eprintln!("  sha256: {cargo_lock_hash}");
 
+    let test_unit_graph = if cli.include_dev {
+        eprintln!("Running cargo test --unit-graph (for dev dependencies)...");
+        let tug = cargo::run_test_unit_graph(&cli)?;
+        eprintln!("  {} units, {} roots", tug.units.len(), tug.roots.len());
+        Some(tug)
+    } else {
+        None
+    };
+
     eprintln!("Merging...");
-    let mut plan = merge::merge(&unit_graph, &metadata, &lock, cli.target.as_deref(), cargo_lock_hash)?;
+    let mut plan = merge::merge(
+        &unit_graph,
+        &metadata,
+        &lock,
+        cli.target.as_deref(),
+        cargo_lock_hash,
+        test_unit_graph.as_ref(),
+    )?;
     eprintln!("  {} crates in build plan", plan.crates.len());
     eprintln!("  {} workspace members", plan.workspace_members.len());
     if let Some(ref t) = plan.target {
