@@ -163,6 +163,8 @@
           sample-builds = sampleWorkspace.allWorkspaceMembers;
           sample-clippy = sampleWorkspace.clippy.allWorkspaceMembers;
           sample-test-deps = sampleWorkspace.test.allWorkspaceMembers;
+          sample-run-tests = sampleWorkspace.test.check."sample-lib";
+          sample-run-tests-bin = sampleWorkspace.test.check."sample-bin";
 
           # Auto mode (IFD): builds sample_workspace with no pre-generated JSON
           sample-auto = (buildFromUnitGraphAuto {

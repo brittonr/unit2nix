@@ -210,6 +210,33 @@ Lessons:
 - Explicit lifetime annotations `<'a>` on functions that take a single reference are redundant — Rust's elision rules handle it
 - `str::to_owned` is the idiomatic method reference for `|s: &str| s.to_string()`
 
+## Session: 2026-03-03 #5 — Test coverage + Nix test execution
+Changes made:
+- **Test coverage**: Added 21 new unit tests for merge.rs (was 4, now 25 in merge, 41 total project)
+  - `make_relative` (2 tests): prefix stripping, mismatch fallback
+  - `sanitize_metadata` (2 tests): newline replacement, quote replacement
+  - `collect_features` (3 tests): dedup+sort, Build-mode-only, lib-like-only
+  - `collect_dependencies` (3 tests): self-ref filtering, RunCustomBuild skip, dedup
+  - `collect_build_dependencies` (2 tests): from build script, empty when None
+  - `validate_references` (2 tests): passes on valid, fails on dangling
+  - `build_nix_crate` (3 tests): lib crate, bin-only crate, skips no-buildable-target
+  - `compute_dev_dependencies` (2 tests): identifies dev-only deps, adds dev-only crates
+  - `merge` (2 tests): end-to-end with workspace fixture, workspace_members mapping
+- **Test fixture helpers**: `make_unit()`, `make_meta_pkg()`, `make_lock_pkg()` for easy fixture construction
+- **Nix test execution**: `test.check` attribute runs `#[test]` functions inside Nix sandbox
+  - Uses `.override { buildTests = true; }` on testCrates (no code duplication)
+  - Dependencies built normally (same store paths); only workspace member recompiled with `--test`
+  - Test binaries in `$out/tests/` executed via `runCommand`
+- **sample-lib**: Now uses `pretty_assertions::assert_eq!` (validates dev-dep linking actually works)
+- **Flake checks**: Added `sample-run-tests` and `sample-run-tests-bin` (13 total checks)
+- **README**: Updated test count 20→41, check count 9→13, added `test.check`/`test.workspaceMembers`/`clippy.allWorkspaceMembers` to API table, added "Running tests in Nix" section
+- **Verification**: cargo test 41/41, cargo clippy pedantic 0 warnings, nix flake check 13/13
+
+Lessons:
+- `buildRustCrate` supports `buildTests = true` which compiles with `--test` and installs test binaries to `$out/tests/` — does NOT run them
+- `.override { buildTests = true; }` on a buildRustCrate result works because it's wrapped in `makeOverridable` — no need to duplicate the entire build function
+- When `buildTests = true`, the derivation only has `out` (no `lib`), so test builds can't be used as deps — each test build must link against normal builds
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

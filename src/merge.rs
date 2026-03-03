@@ -643,7 +643,70 @@ fn validate_references(crates: &BTreeMap<String, NixCrate>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pkg_id;
+    use super::*;
+    use crate::metadata::{CargoLock, CargoMetadata, LockPackage, MetadataPackage};
+    use crate::output::{NixCrate, NixDep};
+    use crate::unit_graph::{CrateKind, Unit, UnitDep, UnitGraph, UnitMode, UnitTarget};
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    // ---------------------------------------------------------------------------
+    // Test fixtures / helpers
+    // ---------------------------------------------------------------------------
+
+    fn make_unit(
+        pkg_id: &str,
+        kind: Vec<CrateKind>,
+        mode: UnitMode,
+        features: Vec<&str>,
+        deps: Vec<(usize, &str)>,
+    ) -> Unit {
+        Unit {
+            pkg_id: pkg_id.to_string(),
+            target: UnitTarget {
+                kind,
+                crate_types: vec!["lib".to_string()],
+                name: "test".to_string(),
+                src_path: "/path/to/src/lib.rs".to_string(),
+                edition: "2021".to_string(),
+            },
+            mode,
+            features: features.iter().map(|s| s.to_string()).collect(),
+            dependencies: deps
+                .iter()
+                .map(|(idx, name)| UnitDep {
+                    index: *idx,
+                    extern_crate_name: name.to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    fn make_meta_pkg(id: &str, source: Option<&str>, manifest_path: &str) -> MetadataPackage {
+        MetadataPackage {
+            id: id.to_string(),
+            source: source.map(str::to_string),
+            manifest_path: manifest_path.to_string(),
+            links: None,
+            authors: Some(vec!["Test Author <test@example.com>".to_string()]),
+            description: Some("A test package".to_string()),
+            homepage: None,
+            license: Some("MIT".to_string()),
+            repository: None,
+        }
+    }
+
+    fn make_lock_pkg(name: &str, version: &str, checksum: Option<&str>) -> LockPackage {
+        LockPackage {
+            name: name.to_string(),
+            version: version.to_string(),
+            checksum: checksum.map(str::to_string),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // parse_pkg_id tests (existing)
+    // ---------------------------------------------------------------------------
 
     #[test]
     fn parse_registry_pkg_id() {
@@ -675,5 +738,710 @@ mod tests {
     fn parse_pkg_id_malformed_no_hash() {
         let result = parse_pkg_id("garbage-with-no-hash");
         assert!(result.is_err(), "should error on malformed pkg_id");
+    }
+
+    // ---------------------------------------------------------------------------
+    // make_relative tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn make_relative_strips_prefix() {
+        let crate_root = Path::new("/home/user/project/crates/foo");
+        let abs_path = "/home/user/project/crates/foo/src/lib.rs";
+        let result = make_relative(abs_path, crate_root);
+        assert_eq!(result, "src/lib.rs");
+    }
+
+    #[test]
+    fn make_relative_returns_original_on_mismatch() {
+        let crate_root = Path::new("/home/user/project/crates/foo");
+        let abs_path = "/other/path/src/lib.rs";
+        let result = make_relative(abs_path, crate_root);
+        assert_eq!(result, abs_path);
+    }
+
+    // ---------------------------------------------------------------------------
+    // sanitize_metadata tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn sanitize_metadata_replaces_newlines() {
+        let input = "Line one\nLine two\r\nLine three";
+        let result = sanitize_metadata(input);
+        // Note: \r\n becomes two spaces because both \n and \r are replaced
+        assert_eq!(result, "Line one Line two  Line three");
+        assert!(!result.contains('\n'));
+        assert!(!result.contains('\r'));
+    }
+
+    #[test]
+    fn sanitize_metadata_replaces_quotes() {
+        let input = r#"Some "quoted" text"#;
+        let result = sanitize_metadata(input);
+        assert_eq!(result, "Some 'quoted' text");
+        assert!(!result.contains('"'));
+    }
+
+    // ---------------------------------------------------------------------------
+    // collect_features tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn collect_features_deduplicates_and_sorts() {
+        let unit0 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["default", "feature_a"],
+            vec![],
+        );
+        let unit1 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["feature_b", "default"],
+            vec![],
+        );
+        let units = vec![(0, &unit0), (1, &unit1)];
+        let features = collect_features(&units);
+        assert_eq!(features, vec!["default", "feature_a", "feature_b"]);
+    }
+
+    #[test]
+    fn collect_features_only_from_build_mode() {
+        let unit0 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["feature_a"],
+            vec![],
+        );
+        let unit1 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Test,
+            vec!["test_feature"],
+            vec![],
+        );
+        let unit2 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::RunCustomBuild,
+            vec!["build_feature"],
+            vec![],
+        );
+        let units = vec![(0, &unit0), (1, &unit1), (2, &unit2)];
+        let features = collect_features(&units);
+        assert_eq!(features, vec!["feature_a"]);
+    }
+
+    #[test]
+    fn collect_features_only_lib_like_targets() {
+        let unit0 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["lib_feature"],
+            vec![],
+        );
+        let unit1 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::CustomBuild],
+            UnitMode::Build,
+            vec!["build_feature"],
+            vec![],
+        );
+        let units = vec![(0, &unit0), (1, &unit1)];
+        let features = collect_features(&units);
+        assert_eq!(features, vec!["lib_feature"]);
+    }
+
+    // ---------------------------------------------------------------------------
+    // collect_dependencies tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn collect_dependencies_filters_self_refs() {
+        let pkg_id = "pkg#0.1.0";
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit(pkg_id, vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(pkg_id, vec![CrateKind::Bin], UnitMode::Build, vec![], vec![(0, "pkg")]),
+            ],
+            roots: vec![0],
+        };
+        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let units = vec![(1, &unit_graph.units[1])];
+
+        let deps = collect_dependencies(&units, &unit_graph, &unit_pkg_ids, pkg_id);
+        assert!(deps.is_empty(), "bin→lib self-refs should be filtered");
+    }
+
+    #[test]
+    fn collect_dependencies_skips_run_custom_build() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("pkg#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "dep#0.2.0",
+                    vec![CrateKind::CustomBuild],
+                    UnitMode::RunCustomBuild,
+                    vec![],
+                    vec![],
+                ),
+                make_unit(
+                    "pkg#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Build,
+                    vec![],
+                    vec![(1, "dep")],
+                ),
+            ],
+            roots: vec![0],
+        };
+        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let units = vec![(2, &unit_graph.units[2])];
+
+        let deps = collect_dependencies(&units, &unit_graph, &unit_pkg_ids, "pkg#0.1.0");
+        assert!(deps.is_empty(), "RunCustomBuild deps should be skipped");
+    }
+
+    #[test]
+    fn collect_dependencies_deduplicates() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("pkg#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep")]),
+                make_unit("dep#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("pkg#0.1.0", vec![CrateKind::Bin], UnitMode::Build, vec![], vec![(1, "dep")]),
+            ],
+            roots: vec![0],
+        };
+        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let units = vec![(0, &unit_graph.units[0]), (2, &unit_graph.units[2])];
+
+        let deps = collect_dependencies(&units, &unit_graph, &unit_pkg_ids, "pkg#0.1.0");
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].package_id, "dep#0.2.0");
+        assert_eq!(deps[0].extern_crate_name, "dep");
+    }
+
+    // ---------------------------------------------------------------------------
+    // collect_build_dependencies tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn collect_build_dependencies_from_build_script() {
+        let build_script = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::CustomBuild],
+            UnitMode::Build,
+            vec![],
+            vec![(0, "build_dep"), (1, "another_dep")],
+        );
+        let unit_pkg_ids = vec!["build_dep#0.1.0", "another_dep#0.2.0"];
+
+        let deps = collect_build_dependencies(Some(&(0, &build_script)), &unit_pkg_ids);
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0].package_id, "build_dep#0.1.0");
+        assert_eq!(deps[0].extern_crate_name, "build_dep");
+        assert_eq!(deps[1].package_id, "another_dep#0.2.0");
+        assert_eq!(deps[1].extern_crate_name, "another_dep");
+    }
+
+    #[test]
+    fn collect_build_dependencies_returns_empty_when_none() {
+        let deps = collect_build_dependencies(None, &[]);
+        assert!(deps.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // validate_references tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn validate_references_passes_when_all_valid() {
+        let mut crates = BTreeMap::new();
+        crates.insert(
+            "pkg_a#0.1.0".to_string(),
+            NixCrate {
+                crate_name: "pkg_a".to_string(),
+                version: "0.1.0".to_string(),
+                edition: "2021".to_string(),
+                sha256: None,
+                source: None,
+                features: vec![],
+                dependencies: vec![NixDep {
+                    package_id: "pkg_b#0.2.0".to_string(),
+                    extern_crate_name: "pkg_b".to_string(),
+                }],
+                build_dependencies: vec![],
+                dev_dependencies: vec![],
+                proc_macro: false,
+                build: None,
+                lib_path: None,
+                lib_name: None,
+                lib_crate_types: vec![],
+                crate_bin: vec![],
+                links: None,
+                authors: vec![],
+                description: None,
+                homepage: None,
+                license: None,
+                repository: None,
+            },
+        );
+        crates.insert(
+            "pkg_b#0.2.0".to_string(),
+            NixCrate {
+                crate_name: "pkg_b".to_string(),
+                version: "0.2.0".to_string(),
+                edition: "2021".to_string(),
+                sha256: None,
+                source: None,
+                features: vec![],
+                dependencies: vec![],
+                build_dependencies: vec![],
+                dev_dependencies: vec![],
+                proc_macro: false,
+                build: None,
+                lib_path: None,
+                lib_name: None,
+                lib_crate_types: vec![],
+                crate_bin: vec![],
+                links: None,
+                authors: vec![],
+                description: None,
+                homepage: None,
+                license: None,
+                repository: None,
+            },
+        );
+
+        let result = validate_references(&crates);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_references_fails_with_dangling_refs() {
+        let mut crates = BTreeMap::new();
+        crates.insert(
+            "pkg_a#0.1.0".to_string(),
+            NixCrate {
+                crate_name: "pkg_a".to_string(),
+                version: "0.1.0".to_string(),
+                edition: "2021".to_string(),
+                sha256: None,
+                source: None,
+                features: vec![],
+                dependencies: vec![NixDep {
+                    package_id: "missing#0.9.0".to_string(),
+                    extern_crate_name: "missing".to_string(),
+                }],
+                build_dependencies: vec![],
+                dev_dependencies: vec![],
+                proc_macro: false,
+                build: None,
+                lib_path: None,
+                lib_name: None,
+                lib_crate_types: vec![],
+                crate_bin: vec![],
+                links: None,
+                authors: vec![],
+                description: None,
+                homepage: None,
+                license: None,
+                repository: None,
+            },
+        );
+
+        let result = validate_references(&crates);
+        assert!(result.is_err());
+    }
+
+    // ---------------------------------------------------------------------------
+    // build_nix_crate tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn build_nix_crate_lib_crate() {
+        let pkg_id = "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0";
+        let unit_graph = UnitGraph {
+            units: vec![make_unit(
+                pkg_id,
+                vec![CrateKind::Lib],
+                UnitMode::Build,
+                vec!["default", "std"],
+                vec![],
+            )],
+            roots: vec![0],
+        };
+        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let units = vec![(0, &unit_graph.units[0])];
+
+        let meta_pkg = make_meta_pkg(
+            pkg_id,
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            "/path/to/Cargo.toml",
+        );
+        let mut checksums = BTreeMap::new();
+        checksums.insert(("serde", "1.0.0"), "abc123");
+
+        let result = build_nix_crate(
+            pkg_id,
+            &units,
+            &unit_graph,
+            &unit_pkg_ids,
+            Some(&meta_pkg),
+            &checksums,
+            "/workspace",
+            false,
+        )
+        .unwrap();
+
+        assert!(result.is_some());
+        let crate_info = result.unwrap();
+        assert_eq!(crate_info.crate_name, "serde");
+        assert_eq!(crate_info.version, "1.0.0");
+        assert_eq!(crate_info.features, vec!["default", "std"]);
+        assert_eq!(crate_info.sha256, Some("abc123".to_string()));
+        assert!(!crate_info.proc_macro);
+    }
+
+    #[test]
+    fn build_nix_crate_bin_only() {
+        let pkg_id = "path+file:///home/user/proj#mybin@0.1.0";
+        let mut unit = make_unit(pkg_id, vec![CrateKind::Bin], UnitMode::Build, vec![], vec![]);
+        unit.target.src_path = "/home/user/proj/src/main.rs".to_string();
+        unit.target.name = "mybin".to_string();
+
+        let unit_graph = UnitGraph {
+            units: vec![unit],
+            roots: vec![0],
+        };
+        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let units = vec![(0, &unit_graph.units[0])];
+
+        let meta_pkg = make_meta_pkg(pkg_id, None, "/home/user/proj/Cargo.toml");
+
+        let result = build_nix_crate(
+            pkg_id,
+            &units,
+            &unit_graph,
+            &unit_pkg_ids,
+            Some(&meta_pkg),
+            &BTreeMap::new(),
+            "/workspace",
+            true, // include_bins = true
+        )
+        .unwrap();
+
+        assert!(result.is_some());
+        let crate_info = result.unwrap();
+        assert_eq!(crate_info.crate_name, "mybin");
+        assert_eq!(crate_info.crate_bin.len(), 1);
+        assert_eq!(crate_info.crate_bin[0].name, "mybin");
+    }
+
+    #[test]
+    fn build_nix_crate_skips_no_buildable_target() {
+        let pkg_id = "pkg#0.1.0";
+        let unit_graph = UnitGraph {
+            units: vec![make_unit(
+                pkg_id,
+                vec![CrateKind::CustomBuild],
+                UnitMode::RunCustomBuild,
+                vec![],
+                vec![],
+            )],
+            roots: vec![0],
+        };
+        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let units = vec![(0, &unit_graph.units[0])];
+
+        let result = build_nix_crate(
+            pkg_id,
+            &units,
+            &unit_graph,
+            &unit_pkg_ids,
+            None,
+            &BTreeMap::new(),
+            "/workspace",
+            false,
+        )
+        .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    // ---------------------------------------------------------------------------
+    // compute_dev_dependencies tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn compute_dev_dependencies_identifies_dev_only_deps() {
+        let build_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep_a")]),
+                make_unit("dep_a#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep_a")]),
+                make_unit("dep_a#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "ws_member#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "dep_a"), (3, "dev_dep")],
+                ),
+                make_unit("dev_dep#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_member#0.1.0".to_string()],
+        };
+
+        let meta_by_id = BTreeMap::new();
+        let checksums = BTreeMap::new();
+        let mut crates = BTreeMap::new();
+
+        // Pre-populate with ws_member and dep_a (from build graph)
+        crates.insert(
+            "ws_member#0.1.0".to_string(),
+            NixCrate {
+                crate_name: "ws_member".to_string(),
+                version: "0.1.0".to_string(),
+                edition: "2021".to_string(),
+                sha256: None,
+                source: None,
+                features: vec![],
+                dependencies: vec![NixDep {
+                    package_id: "dep_a#0.2.0".to_string(),
+                    extern_crate_name: "dep_a".to_string(),
+                }],
+                build_dependencies: vec![],
+                dev_dependencies: vec![],
+                proc_macro: false,
+                build: None,
+                lib_path: None,
+                lib_name: None,
+                lib_crate_types: vec![],
+                crate_bin: vec![],
+                links: None,
+                authors: vec![],
+                description: None,
+                homepage: None,
+                license: None,
+                repository: None,
+            },
+        );
+        crates.insert(
+            "dep_a#0.2.0".to_string(),
+            NixCrate {
+                crate_name: "dep_a".to_string(),
+                version: "0.2.0".to_string(),
+                edition: "2021".to_string(),
+                sha256: None,
+                source: None,
+                features: vec![],
+                dependencies: vec![],
+                build_dependencies: vec![],
+                dev_dependencies: vec![],
+                proc_macro: false,
+                build: None,
+                lib_path: None,
+                lib_name: None,
+                lib_crate_types: vec![],
+                crate_bin: vec![],
+                links: None,
+                authors: vec![],
+                description: None,
+                homepage: None,
+                license: None,
+                repository: None,
+            },
+        );
+
+        compute_dev_dependencies(
+            &test_graph,
+            &build_graph,
+            &metadata,
+            &meta_by_id,
+            &checksums,
+            &mut crates,
+        )
+        .unwrap();
+
+        // dev_dep should have been added to crates
+        assert!(crates.contains_key("dev_dep#0.3.0"));
+
+        // ws_member should now have dev_dependencies
+        let ws_crate = &crates["ws_member#0.1.0"];
+        assert_eq!(ws_crate.dev_dependencies.len(), 1);
+        assert_eq!(ws_crate.dev_dependencies[0].package_id, "dev_dep#0.3.0");
+        assert_eq!(ws_crate.dev_dependencies[0].extern_crate_name, "dev_dep");
+    }
+
+    #[test]
+    fn compute_dev_dependencies_adds_dev_only_crates() {
+        let build_graph = UnitGraph {
+            units: vec![make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![])],
+            roots: vec![0],
+        };
+
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit(
+                    "ws_member#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "test_only")],
+                ),
+                make_unit("test_only#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_member#0.1.0".to_string()],
+        };
+
+        let meta_by_id = BTreeMap::new();
+        let checksums = BTreeMap::new();
+        let mut crates = BTreeMap::new();
+
+        crates.insert(
+            "ws_member#0.1.0".to_string(),
+            NixCrate {
+                crate_name: "ws_member".to_string(),
+                version: "0.1.0".to_string(),
+                edition: "2021".to_string(),
+                sha256: None,
+                source: None,
+                features: vec![],
+                dependencies: vec![],
+                build_dependencies: vec![],
+                dev_dependencies: vec![],
+                proc_macro: false,
+                build: None,
+                lib_path: None,
+                lib_name: None,
+                lib_crate_types: vec![],
+                crate_bin: vec![],
+                links: None,
+                authors: vec![],
+                description: None,
+                homepage: None,
+                license: None,
+                repository: None,
+            },
+        );
+
+        compute_dev_dependencies(
+            &test_graph,
+            &build_graph,
+            &metadata,
+            &meta_by_id,
+            &checksums,
+            &mut crates,
+        )
+        .unwrap();
+
+        // test_only crate should have been added to the build plan
+        assert!(crates.contains_key("test_only#0.1.0"));
+        assert_eq!(crates["test_only#0.1.0"].crate_name, "test_only");
+    }
+
+    // ---------------------------------------------------------------------------
+    // merge tests (end-to-end)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn merge_simple_workspace() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_pkg#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec!["default"], vec![(1, "dep")]),
+                make_unit("dep#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("ws_pkg#0.1.0", None, "/workspace/Cargo.toml"),
+                make_meta_pkg(
+                    "dep#0.2.0",
+                    Some("registry+https://github.com/rust-lang/crates.io-index"),
+                    "/registry/dep/Cargo.toml",
+                ),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_pkg#0.1.0".to_string()],
+        };
+
+        let lock = CargoLock {
+            package: Some(vec![make_lock_pkg("dep", "0.2.0", Some("def456"))]),
+        };
+
+        let plan = merge(&unit_graph, &metadata, &lock, None, "hash123".to_string(), None).unwrap();
+
+        assert_eq!(plan.version, BUILD_PLAN_VERSION);
+        assert_eq!(plan.workspace_root, "/workspace");
+        assert_eq!(plan.roots.len(), 1);
+        assert_eq!(plan.roots[0], "ws_pkg#0.1.0");
+        assert_eq!(plan.cargo_lock_hash, "hash123");
+
+        assert_eq!(plan.crates.len(), 2);
+        assert!(plan.crates.contains_key("ws_pkg#0.1.0"));
+        assert!(plan.crates.contains_key("dep#0.2.0"));
+
+        let ws_crate = &plan.crates["ws_pkg#0.1.0"];
+        assert_eq!(ws_crate.crate_name, "ws_pkg");
+        assert_eq!(ws_crate.features, vec!["default"]);
+        assert_eq!(ws_crate.dependencies.len(), 1);
+        assert_eq!(ws_crate.dependencies[0].package_id, "dep#0.2.0");
+
+        let dep_crate = &plan.crates["dep#0.2.0"];
+        assert_eq!(dep_crate.crate_name, "dep");
+        assert_eq!(dep_crate.sha256, Some("def456".to_string()));
+    }
+
+    #[test]
+    fn merge_includes_workspace_members_mapping() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0, 1],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("member_a#0.1.0", None, "/workspace/a/Cargo.toml"),
+                make_meta_pkg("member_b#0.2.0", None, "/workspace/b/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string(), "member_b#0.2.0".to_string()],
+        };
+
+        let lock = CargoLock { package: None };
+
+        let plan = merge(&unit_graph, &metadata, &lock, None, "hash".to_string(), None).unwrap();
+
+        assert_eq!(plan.workspace_members.len(), 2);
+        assert_eq!(plan.workspace_members.get("member_a"), Some(&"member_a#0.1.0".to_string()));
+        assert_eq!(plan.workspace_members.get("member_b"), Some(&"member_b#0.2.0".to_string()));
     }
 }

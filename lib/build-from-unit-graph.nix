@@ -497,6 +497,30 @@ assert _targetCheck;
         _name: packageId: testCrates.crates.${packageId}
       ) (resolved.workspaceMembers or {});
     };
+
+    # Run test binaries for workspace members.
+    # Uses .override { buildTests = true; } on the testCrates build (which already
+    # includes dev deps). Dependencies stay as normal lib builds (same store paths);
+    # only the workspace member itself is recompiled with `--test`.
+    check = lib.mapAttrs (
+      _name: packageId:
+      let
+        # Rebuild this one crate with buildTests — deps remain normal .lib builds
+        testBinDrv = (testCrates.crates.${packageId}).override { buildTests = true; };
+        crateName = resolved.crates.${packageId}.crateName;
+      in
+      pkgs.runCommand "test-${crateName}" {} ''
+        if [ -d "${testBinDrv}/tests" ]; then
+          for t in "${testBinDrv}"/tests/*; do
+            if [ -x "$t" ]; then
+              echo "Running test: $(basename $t)"
+              "$t"
+            fi
+          done
+        fi
+        touch "$out"
+      ''
+    ) (resolved.workspaceMembers or {});
   };
 
   # Clippy: workspace members checked with clippy-driver, dependencies

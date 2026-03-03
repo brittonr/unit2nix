@@ -223,6 +223,9 @@ Returns:
 | `workspaceMembers` | `{ name = { packageId, build }; }` | Workspace members by crate name |
 | `rootCrate` | `{ packageId, build }` or `null` | Root package (if any) |
 | `allWorkspaceMembers` | derivation | `symlinkJoin` of all members |
+| `test.check` | `{ name = drv; }` | Run `#[test]` for each workspace member (requires `--include-dev`) |
+| `test.workspaceMembers` | `{ name = { packageId, build }; }` | Workspace members built with dev deps |
+| `clippy.allWorkspaceMembers` | derivation | Lint all workspace members with clippy |
 | `resolved` | attrset | Raw parsed JSON |
 | `builtCrates` | `{ crates = { pkgId = drv; }; }` | All crate derivations by package ID |
 
@@ -248,6 +251,23 @@ buildFromUnitGraph {
   };
 }
 ```
+
+### Running tests in Nix
+
+Generate a build plan with dev dependencies, then use `test.check` to compile and run `#[test]` functions inside the Nix sandbox:
+
+```bash
+# Generate with dev deps
+cargo unit2nix --include-dev -o build-plan.json
+
+# Run tests for a specific workspace member
+nix build .#test.check.my-crate
+
+# Or add to flake checks for CI
+checks.x86_64-linux.my-crate-tests = ws.test.check."my-crate";
+```
+
+Each `test.check.<name>` derivation compiles the workspace member with `buildTests = true` (producing test binaries via `rustc --test`), then executes them. Dependencies are built normally and cached — only the workspace member itself is recompiled for testing.
 
 ### Cross-compilation
 
@@ -317,8 +337,8 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 ## Testing
 
 ```bash
-cargo test              # 20 unit tests
-nix flake check         # 9 checks: sample build + fd/bat/ripgrep/nushell validation + 3 NixOS VM tests
+cargo test              # 41 unit tests
+nix flake check         # 13 checks: sample build/clippy/test + fd/bat/ripgrep/nushell validation + 3 NixOS VM tests
 ```
 
 ## Requirements
