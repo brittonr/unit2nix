@@ -1,10 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::cargo;
 use crate::cli::Cli;
 use crate::merge;
 use crate::output::NixBuildPlan;
-use crate::overrides;
+use crate::overrides::{self, print_override_report};
 use crate::prefetch;
 
 /// Shared entry point for both `unit2nix` and `cargo unit2nix`.
@@ -13,6 +13,15 @@ pub fn run(cli: &Cli) -> Result<()> {
     if cli.check_overrides {
         return run_check_overrides(cli);
     }
+
+    // Validate: --members and --package are mutually exclusive
+    if cli.members.is_some() && cli.package.is_some() {
+        bail!("--members and --package cannot be used together");
+    }
+
+    let members_filter: Option<Vec<String>> = cli.members.as_ref().map(|m| {
+        m.split(',').map(|s| s.trim().to_string()).collect()
+    });
 
     eprintln!("Running cargo build --unit-graph...");
     let unit_graph = cargo::run_unit_graph(cli)?;
@@ -52,6 +61,7 @@ pub fn run(cli: &Cli) -> Result<()> {
         cli.target.as_deref(),
         cargo_lock_hash,
         test_unit_graph.as_ref(),
+        members_filter.as_deref(),
     )?;
     eprintln!("  {} crates in build plan", plan.crates.len());
     eprintln!("  {} workspace members", plan.workspace_members.len());
@@ -73,6 +83,16 @@ pub fn run(cli: &Cli) -> Result<()> {
         None => println!("{json}"),
     }
 
+    // Auto-check override coverage after generation (unless suppressed)
+    if !cli.no_check {
+        let report = overrides::check_overrides(&plan);
+        if report.total > 0 {
+            eprintln!();
+            eprintln!("Override coverage:");
+            print_override_report(&report, false);
+        }
+    }
+
     Ok(())
 }
 
@@ -89,6 +109,7 @@ fn run_check_overrides(cli: &Cli) -> Result<()> {
     let plan: NixBuildPlan = serde_json::from_str(&contents)
         .with_context(|| format!("failed to parse build plan from {}", path.display()))?;
 
-    overrides::check_overrides(&plan);
+    let report = overrides::check_overrides(&plan);
+    print_override_report(&report, cli.json);
     Ok(())
 }

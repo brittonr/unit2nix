@@ -17,14 +17,30 @@ struct PrefetchGitResult {
 /// This produces a fixed-output hash that `pkgs.fetchgit` can use,
 /// enabling pure flake evaluation without `--impure`.
 pub fn prefetch_git(url: &str, rev: &str) -> Result<String> {
-    let output = Command::new("nix-prefetch-git")
+    let output = match Command::new("nix-prefetch-git")
         .args(["--url", url, "--rev", rev, "--fetch-submodules", "--quiet"])
         .output()
-        .context("failed to run nix-prefetch-git (is it installed?)")?;
+    {
+        Ok(o) => o,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            bail!(
+                "nix-prefetch-git not found on PATH.\n\
+                 Install it with `nix-env -iA nixpkgs.nix-prefetch-git`,\n\
+                 or use `nix run .#update-plan` which bundles it automatically."
+            );
+        }
+        Err(e) => {
+            return Err(anyhow::Error::new(e)
+                .context("failed to run nix-prefetch-git"));
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("nix-prefetch-git failed for {url} at {rev}:\n{stderr}");
+        bail!(
+            "nix-prefetch-git failed for {url} at {rev}:\n{stderr}\n\n\
+             hint: check that the URL is reachable: `git ls-remote {url}`"
+        );
     }
 
     let result: PrefetchGitResult = serde_json::from_slice(&output.stdout)

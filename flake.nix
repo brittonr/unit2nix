@@ -42,6 +42,7 @@
             extraCrateOverrides ? {},
             skipStalenessCheck ? false,
             clippyArgs ? [],
+            members ? null,
           }:
           import ./lib/build-from-unit-graph.nix {
             inherit
@@ -53,6 +54,7 @@
               extraCrateOverrides
               skipStalenessCheck
               clippyArgs
+              members
               ;
           };
 
@@ -67,6 +69,7 @@
             defaultCrateOverrides ? null,
             extraCrateOverrides ? {},
             clippyArgs ? [],
+            members ? null,
           }:
           import ./lib/auto.nix {
             inherit
@@ -77,6 +80,7 @@
               defaultCrateOverrides
               extraCrateOverrides
               clippyArgs
+              members
               ;
             unit2nix = self.packages.${system}.unit2nix;
           };
@@ -166,11 +170,33 @@
           sample-run-tests = sampleWorkspace.test.check."sample-lib";
           sample-run-tests-bin = sampleWorkspace.test.check."sample-bin";
 
+          # Members filter: build only sample-bin from 4-member workspace
+          sample-members-filter = (buildFromUnitGraph {
+            inherit pkgs;
+            src = ./sample_workspace;
+            resolvedJson = ./sample_workspace/build-plan.json;
+            members = [ "sample-bin" ];
+          }).allWorkspaceMembers;
+
           # Auto mode (IFD): builds sample_workspace with no pre-generated JSON
           sample-auto = (buildFromUnitGraphAuto {
             inherit pkgs;
             src = ./sample_workspace;
           }).allWorkspaceMembers;
+
+          # Override coverage check: verify no unknown -sys crates in bat's plan
+          check-overrides-bat = pkgs.runCommand "check-overrides-bat" {
+            nativeBuildInputs = [ unit2nix pkgs.jq ];
+          } ''
+            unit2nix --check-overrides --json -o ${./tests/bat/build-plan.json} > report.json
+            missing=$(jq -r '.missing' report.json)
+            if [ "$missing" -gt 0 ]; then
+              echo "Missing overrides detected:"
+              jq -r '.crates[] | select(.status == "unknown") | "  \(.name) (links=\(.links))"' report.json
+              exit 1
+            fi
+            cp report.json $out
+          '';
 
           # Real-world validation: pure Rust workspace (34 crates)
           validate-ripgrep = import ./tests/ripgrep/build.nix { inherit pkgs; };

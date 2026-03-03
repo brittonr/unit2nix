@@ -35,6 +35,11 @@
   # Extra arguments passed to clippy-driver (e.g. ["-D" "warnings"]).
   # Used by the .clippy output — has no effect on normal builds.
   clippyArgs ? [],
+  # Optional: filter which workspace members are exposed.
+  # When set, only listed member names appear in workspaceMembers,
+  # allWorkspaceMembers, test, and clippy outputs.
+  # All crates remain in the build plan (Nix laziness means unused ones are never built).
+  members ? null,
 }:
 
 let
@@ -83,6 +88,30 @@ let
         true
     else
       true;
+
+  # Workspace member filtering: validate and filter when `members` is set.
+  allWorkspaceMemberNames = builtins.attrNames (resolved.workspaceMembers or {});
+  _membersValidation =
+    if members != null then
+      let
+        invalid = builtins.filter (m: !(lib.elem m allWorkspaceMemberNames)) members;
+      in
+      if invalid != [] then
+        builtins.throw (
+          "unit2nix: unknown workspace member(s): ${builtins.concatStringsSep ", " invalid}. "
+          + "Valid members: ${builtins.concatStringsSep ", " allWorkspaceMemberNames}"
+        )
+      else
+        true
+    else
+      true;
+
+  filteredWorkspaceMembers =
+    assert _membersValidation;
+    if members != null then
+      lib.filterAttrs (name: _: lib.elem name members) (resolved.workspaceMembers or {})
+    else
+      (resolved.workspaceMembers or {});
 
   fetchSource = import ./fetch-source.nix { inherit pkgs src; };
 
@@ -194,8 +223,15 @@ let
         if hasLinks && !hasOverride && !isKnownNoOverride then
           builtins.trace
             ("unit2nix: WARNING — crate '${crateInfo.crateName}' has links=\"${linksValue}\""
-              + " but no override found. It may need native libraries."
-              + " See docs/sys-crate-overrides.md or use extraCrateOverrides.")
+              + " but no override found. It may need native libraries.\n"
+              + "  Add to your flake.nix:\n"
+              + "    extraCrateOverrides = {\n"
+              + "      ${crateInfo.crateName} = attrs: {\n"
+              + "        nativeBuildInputs = [ pkgs.pkg-config ];\n"
+              + "        buildInputs = [ pkgs.<library> ];\n"
+              + "      };\n"
+              + "    };\n"
+              + "  See docs/sys-crate-overrides.md for details.")
             true
         else
           true;
@@ -450,12 +486,15 @@ assert _targetCheck;
   # Workspace members keyed by crate name → { packageId, build }.
   # Uses the explicit workspaceMembers map from the JSON (set by cargo metadata),
   # not a heuristic based on source type.
+  # When `members` is set, only expose selected members.
+  # Internal crate graph (builtCrates, testCrates, clippyCrates) still contains all crates —
+  # filtering only affects what's exposed in the output attrset.
   workspaceMembers = lib.mapAttrs (
     _name: packageId: {
       inherit packageId;
       build = builtCrates.crates.${packageId};
     }
-  ) (resolved.workspaceMembers or { });
+  ) filteredWorkspaceMembers;
 
   # Convenience accessor for single-crate projects. For multi-root workspaces
   # (e.g., `--package a --package b`), only the first root is exposed here.
@@ -477,7 +516,7 @@ assert _targetCheck;
     name = "all-workspace-members";
     paths = lib.mapAttrsToList (
       _name: packageId: builtCrates.crates.${packageId}
-    ) (resolved.workspaceMembers or { });
+    ) filteredWorkspaceMembers;
   };
 
   # Test: workspace members built with dev-dependencies included.
@@ -489,13 +528,13 @@ assert _targetCheck;
         inherit packageId;
         build = testCrates.crates.${packageId};
       }
-    ) (resolved.workspaceMembers or {});
+    ) filteredWorkspaceMembers;
 
     allWorkspaceMembers = pkgs.symlinkJoin {
       name = "all-workspace-members-test";
       paths = lib.mapAttrsToList (
         _name: packageId: testCrates.crates.${packageId}
-      ) (resolved.workspaceMembers or {});
+      ) filteredWorkspaceMembers;
     };
 
     # Run test binaries for workspace members.
@@ -520,7 +559,7 @@ assert _targetCheck;
         fi
         touch "$out"
       ''
-    ) (resolved.workspaceMembers or {});
+    ) filteredWorkspaceMembers;
   };
 
   # Clippy: workspace members checked with clippy-driver, dependencies
@@ -532,13 +571,13 @@ assert _targetCheck;
         inherit packageId;
         build = clippyCrates.crates.${packageId};
       }
-    ) (resolved.workspaceMembers or {});
+    ) filteredWorkspaceMembers;
 
     allWorkspaceMembers = pkgs.symlinkJoin {
       name = "all-workspace-members-clippy";
       paths = lib.mapAttrsToList (
         _name: packageId: clippyCrates.crates.${packageId}
-      ) (resolved.workspaceMembers or {});
+      ) filteredWorkspaceMembers;
     };
   };
 

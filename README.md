@@ -156,6 +156,11 @@ Options:
   --no-default-features     Disable default features
   --target <TRIPLE>         Target triple (e.g. aarch64-unknown-linux-gnu)
   -o, --output <FILE>       Output file [default: stdout]
+  --members <NAMES>         Build only specific workspace members (comma-separated)
+  --include-dev             Include dev-dependencies for test support
+  --check-overrides         Check -sys crate override coverage (reads existing plan)
+  --json                    Machine-readable JSON output (with --check-overrides)
+  --no-check                Skip automatic override check after generation
 ```
 
 ## Nix API
@@ -170,6 +175,7 @@ buildFromUnitGraph {
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate; # override buildRustCrate
   extraCrateOverrides ? {};                           # project-specific -sys overrides
   skipStalenessCheck ? false;                         # skip Cargo.lock hash check
+  members ? null;                                     # filter workspace members (list of names)
 }
 ```
 
@@ -203,6 +209,8 @@ nix run .#update-plan          # Nix users (zero install)
 cargo unit2nix -o build-plan.json   # cargo users
 ```
 
+After generating, unit2nix automatically prints an override coverage summary showing which `-sys` crates are covered, which need attention, and exact override snippets. Use `--no-check` to suppress this in scripts.
+
 unit2nix embeds a SHA256 hash of `Cargo.lock` in `build-plan.json`. At Nix eval time, the hash is compared against the current `Cargo.lock`. If they differ, evaluation fails with a clear error telling you exactly what to run.
 
 To disable (e.g., when source filtering strips `Cargo.lock`):
@@ -234,7 +242,24 @@ Returns:
 Common `-sys` crates work out of the box — unit2nix ships built-in overrides for `ring`, `tikv-jemalloc-sys`, `onig_sys`, and others, and inherits nixpkgs' overrides for `openssl-sys`, `libgit2-sys`, `libz-sys`, etc. Check coverage with:
 
 ```bash
-unit2nix --check-overrides -o build-plan.json
+unit2nix --check-overrides -o build-plan.json        # human-readable
+unit2nix --check-overrides --json -o build-plan.json  # machine-readable (for CI)
+```
+
+For CI, add an override coverage check to your flake:
+
+```nix
+checks.overrides = pkgs.runCommand "check-overrides" {
+  nativeBuildInputs = [ unit2nix pkgs.jq ];
+} ''
+  unit2nix --check-overrides --json -o ${./build-plan.json} > report.json
+  missing=$(jq -r '.missing' report.json)
+  if [ "$missing" -gt 0 ]; then
+    echo "Missing overrides detected"
+    exit 1
+  fi
+  cp report.json $out
+'';
 ```
 
 For project-specific crates, use `extraCrateOverrides`:
@@ -337,8 +362,8 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 ## Testing
 
 ```bash
-cargo test              # 41 unit tests
-nix flake check         # 13 checks: sample build/clippy/test + fd/bat/ripgrep/nushell validation + 3 NixOS VM tests
+cargo test              # 44 unit tests
+nix flake check         # 14 checks: sample build/clippy/test + override coverage + fd/bat/ripgrep/nushell validation + 3 NixOS VM tests
 ```
 
 ## Requirements

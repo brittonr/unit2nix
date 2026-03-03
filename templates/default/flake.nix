@@ -57,7 +57,17 @@
         # Or build all workspace members:
         # packages.default = ws.allWorkspaceMembers;
 
-        # Regenerate build-plan.json when Cargo.lock changes
+        # Or build a subset of workspace members:
+        # ws-subset = unit2nix.lib.${system}.buildFromUnitGraph {
+        #   inherit pkgs;
+        #   src = ./.;
+        #   resolvedJson = ./build-plan.json;
+        #   members = [ "my-bin" "my-lib" ];
+        # };
+
+        # Regenerate build-plan.json when Cargo.lock changes.
+        # After generation, unit2nix automatically prints an override coverage
+        # summary showing which -sys crates need native library overrides.
         apps.update-plan = {
           type = "app";
           program = toString (pkgs.writeShellScript "update-plan" ''
@@ -66,6 +76,23 @@
               -o build-plan.json
           '');
         };
+
+        # Uncomment to add an override coverage check to `nix flake check`:
+        # checks.overrides = pkgs.runCommand "check-overrides" {
+        #   nativeBuildInputs = [
+        #     unit2nix.packages.${system}.unit2nix
+        #     pkgs.jq
+        #   ];
+        # } ''
+        #   unit2nix --check-overrides --json -o ${./build-plan.json} > report.json
+        #   missing=$(jq -r '.missing' report.json)
+        #   if [ "$missing" -gt 0 ]; then
+        #     echo "Missing overrides detected:"
+        #     jq -r '.crates[] | select(.status == "unknown") | "  \(.name) (links=\(.links))"' report.json
+        #     exit 1
+        #   fi
+        #   cp report.json $out
+        # '';
       }
     );
 }

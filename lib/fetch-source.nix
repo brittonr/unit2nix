@@ -45,7 +45,7 @@ else if sourceType == "registry" then
   # since there's no standard download URL convention across registries.
   # The source.index field contains the registry index URL for reference.
   builtins.throw ''
-    Crate ${crateInfo.crateName}-${crateInfo.version} uses alternative registry: ${source.index or "unknown"}
+    unit2nix: crate ${crateInfo.crateName}-${crateInfo.version} uses alternative registry: ${source.index or "unknown"}
     Alternative registries are not yet auto-fetched. Override the source via buildRustCrateForPkgs:
       buildRustCrateForPkgs = pkgs: (pkgs.buildRustCrate.override {
         defaultCrateOverrides = pkgs.defaultCrateOverrides // {
@@ -72,7 +72,11 @@ else if sourceType == "git" then
         }
       else
         builtins.trace
-          "unit2nix: git dep ${crateInfo.crateName} has no sha256; using builtins.fetchGit (requires --impure or add sha256 via nix-prefetch-git)"
+          ("unit2nix: WARNING — git dep '${crateInfo.crateName}' has no sha256; "
+            + "using builtins.fetchGit (requires --impure).\n"
+            + "  To fix, run:\n"
+            + "    nix-prefetch-git --url ${source.url} --rev ${source.rev}\n"
+            + "  Then regenerate the build plan with `nix run .#update-plan`.")
           builtins.fetchGit {
             url = source.url;
             rev = source.rev;

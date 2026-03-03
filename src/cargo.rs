@@ -32,15 +32,21 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let hint = if args.contains(&"--unit-graph") {
+            "\n\nhint: `cargo build --unit-graph` requires nightly Rust \
+             (`-Z unstable-options`). Is nightly installed and active?"
+        } else {
+            ""
+        };
         if stdout.is_empty() {
-            bail!("{description} failed:\n{stderr}");
+            bail!("{description} failed:\n{stderr}{hint}");
         }
         let end = stdout
             .char_indices()
             .nth(500)
             .map_or(stdout.len(), |(i, _)| i);
         let preview = &stdout[..end];
-        bail!("{description} failed:\nstderr: {stderr}\nstdout (truncated): {preview}");
+        bail!("{description} failed:\nstderr: {stderr}\nstdout (truncated): {preview}{hint}");
     }
 
     Ok(output.stdout)
@@ -127,7 +133,12 @@ pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
 pub fn read_cargo_lock(manifest_path: &Path) -> Result<CargoLock> {
     let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read_to_string(&lock_path)
-        .with_context(|| format!("failed to read {}", lock_path.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to read {}. Run `cargo generate-lockfile` or `cargo update` first",
+                lock_path.display()
+            )
+        })?;
     toml::from_str(&content).context("failed to parse Cargo.lock")
 }
 
@@ -139,7 +150,12 @@ pub fn read_cargo_lock(manifest_path: &Path) -> Result<CargoLock> {
 pub fn hash_cargo_lock(manifest_path: &Path) -> Result<String> {
     let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read(&lock_path)
-        .with_context(|| format!("failed to read {} for hashing", lock_path.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to read {} for hashing. Run `cargo generate-lockfile` or `cargo update` first",
+                lock_path.display()
+            )
+        })?;
     let hash = Sha256::digest(&content);
     Ok(format!("{hash:x}"))
 }

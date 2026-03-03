@@ -79,7 +79,10 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             Ok(Some(NixSource::Git { url: parsed.url, rev, sub_dir, sha256: None }))
         }
         Some(s) => {
-            bail!("unknown source type: {s}")
+            bail!(
+                "unknown source type in cargo metadata: {s}\n\
+                 This likely means a newer Cargo source format that unit2nix doesn't handle yet."
+            )
         }
     }
 }
@@ -251,7 +254,7 @@ mod tests {
         let result = parse_source(Some("sparse+https://example.com/index/"), "", "");
         assert!(result.is_err(), "unknown source type should return Err");
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("unknown source type"), "error should mention unknown type: {msg}");
+        assert!(msg.contains("unknown source type in cargo metadata"), "error should mention unknown type: {msg}");
     }
 
     #[test]

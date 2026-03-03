@@ -55,4 +55,26 @@ pub struct Cli {
     /// on workspace members and used by the Nix consumer's `.test` output.
     #[arg(long)]
     pub include_dev: bool,
+
+    /// Build only specific workspace members (comma-separated names).
+    ///
+    /// Filters which members appear in `workspace_members` and `roots` in the
+    /// build plan. The full dependency graph is still resolved — only the entry
+    /// points change. Cannot be combined with `--package`.
+    #[arg(long)]
+    pub members: Option<String>,
+
+    /// Skip the automatic override coverage check after generating a build plan.
+    ///
+    /// By default, unit2nix prints an override coverage summary after writing
+    /// the build plan. Use this flag to suppress it (e.g., in scripts or CI).
+    #[arg(long)]
+    pub no_check: bool,
+
+    /// Output in JSON format (for --check-overrides).
+    ///
+    /// When combined with --check-overrides, outputs a machine-readable JSON
+    /// report instead of the human-readable table.
+    #[arg(long)]
+    pub json: bool,
 }

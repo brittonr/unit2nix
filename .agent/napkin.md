@@ -237,6 +237,50 @@ Lessons:
 - `.override { buildTests = true; }` on a buildRustCrate result works because it's wrapped in `makeOverridable` — no need to duplicate the entire build function
 - When `buildTests = true`, the derivation only has `out` (no `lib`), so test builds can't be used as deps — each test build must link against normal builds
 
+## Session: 2026-03-03 #6 — Error messages polish + check-overrides integration + workspace filtering
+
+### Error messages polish (15 tasks)
+
+Changes made:
+- **Rust CLI**: `run_unit_graph` failure now hints about nightly Rust requirement
+- **Rust CLI**: `read_cargo_lock`/`hash_cargo_lock` failures hint about `cargo generate-lockfile`
+- **Rust CLI**: `nix-prefetch-git` not found detects `ErrorKind::NotFound`, suggests `nix run .#update-plan`
+- **Rust CLI**: `nix-prefetch-git` failure includes URL + rev and `git ls-remote` hint
+- **Rust CLI**: Unknown source type error message more descriptive with Cargo metadata context
+- **Nix**: Missing override `builtins.trace` now includes copy-pasteable `extraCrateOverrides` snippet
+- **Nix**: `fetch-source.nix` git dep without sha256 includes exact `nix-prefetch-git --url --rev` command
+- **Nix**: `vendor.nix` git dep without hash includes step-by-step fix instructions
+- **Consistency**: All `builtins.throw` prefixed with `unit2nix:` (fixed fetch-source.nix registry error, vendor.nix no-rev error)
+- **Consistency**: `ERROR:` → `error:` in merge.rs dangling dep warning
+
+### Check-overrides integration (20 tasks)
+Changes made:
+- **Auto-check**: After writing build plan JSON, automatically prints override coverage summary
+- **`--no-check`**: Skip auto-check in scripts/CI
+- **`--json`**: Machine-readable JSON output for `--check-overrides` (`OverrideReport` struct)
+- **Structured API**: `check_overrides()` returns `OverrideReport` instead of printing directly
+- **Flake check**: `check-overrides-bat` derivation fails on `missing > 0` (via jq)
+- **Template**: Commented-out `checks.overrides` block + update-plan auto-check note
+- **Docs**: Updated README CLI section, sys-crate-overrides.md CI integration section
+- **Tests**: 3 new unit tests (report_covered_and_unknown, report_pure_rust, report_json_roundtrip)
+
+### Workspace filtering (25 tasks)
+Changes made:
+- **`--members` CLI flag**: Comma-separated workspace member names, validated against metadata
+- **Merge filtering**: `members_filter` parameter on `merge()` — filters `workspace_members` and `roots`, keeps `plan.crates` intact
+- **Nix `members` param**: `buildFromUnitGraph { members = ["foo"]; }` — eval-time filtering with validation
+- **Auto mode**: `buildFromUnitGraphAuto` forwards `members` to both CLI and inner buildFromUnitGraph
+- **Flake wiring**: Both `buildFromUnitGraph` and `buildFromUnitGraphAuto` accept `members` in flake.nix
+- **Tests**: 2 new unit tests (merge_members_filter_selects_subset, merge_members_filter_invalid_name_errors) + `sample-members-filter` nix check
+- **Docs**: README CLI + Nix API + template updated with `--members` / `members` examples
+
+- **Verification**: cargo test 46/46, cargo clippy 0 warnings, nix flake check 15/15
+
+Lessons:
+- `members_filter` validation must happen after `workspace_members` is built (which requires the full merge to identify which members are actually in the dependency graph)
+- Nix-side filtering via `filteredWorkspaceMembers` only affects the output attrset — internal crate graphs (builtCrates, testCrates, clippyCrates) still contain all crates for correct dep resolution
+- `--members` and `--package` are mutually exclusive — `--package` selects at cargo resolution level, `--members` filters post-resolution
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

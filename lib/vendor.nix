@@ -135,7 +135,7 @@ let
 
       rev =
         if parsed.fragment != null then parsed.fragment
-        else parsed.rev or (builtins.throw "git dep ${representativePkg.name} has no rev");
+        else parsed.rev or (builtins.throw "unit2nix: git dep '${representativePkg.name}' has no rev in source URL");
 
       # For the auto-build git wrapper, we need actual git repos (with .git).
       # fetchgit with leaveDotGit preserves it. Without a known sha256, we
@@ -152,14 +152,18 @@ let
           }
         else
           builtins.throw ''
-            unit2nix auto mode: git dependency "${representativePkg.name}" from ${parsed.url}
-            requires a SHA256 hash in crate-hashes.json.
+            unit2nix: git dependency "${representativePkg.name}" from ${parsed.url} at ${rev}
+            requires a SHA256 hash in crate-hashes.json for auto mode.
 
-            Add the following to crate-hashes.json in your workspace root:
-              { "${toHashKey representativePkg}": "<sha256>" }
+            Step 1 — get the hash:
+              nix-prefetch-git --url ${parsed.url} --rev ${rev} --fetch-submodules | jq -r .sha256
 
-            To get the hash, run:
-              nix-prefetch-git --url ${parsed.url} --rev ${rev} | jq -r .sha256
+            Step 2 — add it to crate-hashes.json in your workspace root:
+              {
+                "${toHashKey representativePkg}": "<sha256 from step 1>"
+              }
+
+            Step 3 — rebuild. The hash is cached; this is a one-time step per git rev.
           '';
     in
     {

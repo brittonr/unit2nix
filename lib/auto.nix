@@ -35,6 +35,8 @@
   extraCrateOverrides ? {},
   # Optional: extra arguments passed to clippy-driver (e.g. ["-D" "warnings"])
   clippyArgs ? [],
+  # Optional: filter which workspace members are exposed (forwarded to buildFromUnitGraph)
+  members ? null,
 }:
 
 let
@@ -175,12 +177,13 @@ let
     chmod -R u+w source
     cd source
 
-    unit2nix --manifest-path ./${manifestRelPath} -o "$out"
+    unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
+      ${lib.optionalString (members != null) "--members ${builtins.concatStringsSep "," members}"}
   '';
 
 in
 import ./build-from-unit-graph.nix {
-  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs;
+  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs members;
   src = workspaceSrc;
   resolvedJson = generatedPlan;
   skipStalenessCheck = true;

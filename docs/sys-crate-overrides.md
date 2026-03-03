@@ -218,6 +218,55 @@ nix eval --expr 'builtins.attrNames (import <nixpkgs> {}).defaultCrateOverrides'
 nix eval .#lib.x86_64-linux.crateOverrides --apply builtins.attrNames
 ```
 
+## CI integration
+
+### Automatic post-generation check
+
+After writing a build plan, unit2nix automatically prints an override coverage summary. Use `--no-check` to suppress it in scripts:
+
+```bash
+unit2nix -o build-plan.json             # prints override summary
+unit2nix -o build-plan.json --no-check  # silent
+```
+
+### Machine-readable JSON
+
+For CI pipelines, use `--check-overrides --json`:
+
+```bash
+unit2nix --check-overrides --json -o build-plan.json
+```
+
+Output:
+```json
+{
+  "total": 5,
+  "covered": 3,
+  "noOverrideNeeded": 2,
+  "missing": 0,
+  "crates": [...]
+}
+```
+
+### Flake check
+
+Add to your flake to catch override regressions in CI:
+
+```nix
+checks.overrides = pkgs.runCommand "check-overrides" {
+  nativeBuildInputs = [ unit2nix pkgs.jq ];
+} ''
+  unit2nix --check-overrides --json -o ${./build-plan.json} > report.json
+  missing=$(jq -r '.missing' report.json)
+  if [ "$missing" -gt 0 ]; then
+    echo "Missing overrides detected:"
+    jq -r '.crates[] | select(.status == "unknown") | "  \(.name) (links=\(.links))"' report.json
+    exit 1
+  fi
+  cp report.json $out
+'';
+```
+
 ## Full working examples
 
 - [`tests/bat/build.nix`](../tests/bat/build.nix) — [bat](https://github.com/sharkdp/bat) (168 crates): only bat-specific macOS override needed

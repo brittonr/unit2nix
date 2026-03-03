@@ -238,6 +238,7 @@ pub fn merge(
     target: Option<&str>,
     cargo_lock_hash: String,
     test_unit_graph: Option<&UnitGraph>,
+    members_filter: Option<&[String]>,
 ) -> Result<NixBuildPlan> {
     // Index metadata packages by their id
     let meta_by_id: BTreeMap<&str, &MetadataPackage> = metadata
@@ -346,11 +347,43 @@ pub fn merge(
 
     validate_references(&crates)?;
 
+    // Apply workspace member filtering (--members flag)
+    let (filtered_roots, filtered_workspace_members) = if let Some(filter) = members_filter {
+        // Validate all requested names exist
+        let valid_names: Vec<&str> = workspace_members.keys().map(String::as_str).collect();
+        for name in filter {
+            if !workspace_members.contains_key(name) {
+                bail!(
+                    "unknown workspace member '{name}'. Valid members: {}",
+                    valid_names.join(", ")
+                );
+            }
+        }
+
+        // Filter workspace_members to only requested names
+        let filtered_wm: BTreeMap<String, String> = workspace_members
+            .into_iter()
+            .filter(|(name, _)| filter.contains(name))
+            .collect();
+
+        // Filter roots to only package IDs of selected members
+        let member_pkg_ids: std::collections::HashSet<&str> =
+            filtered_wm.values().map(String::as_str).collect();
+        let filtered_roots: Vec<String> = roots
+            .into_iter()
+            .filter(|r| member_pkg_ids.contains(r.as_str()))
+            .collect();
+
+        (filtered_roots, filtered_wm)
+    } else {
+        (roots, workspace_members)
+    };
+
     Ok(NixBuildPlan {
         version: BUILD_PLAN_VERSION,
         workspace_root: metadata.workspace_root.clone(),
-        roots,
-        workspace_members,
+        roots: filtered_roots,
+        workspace_members: filtered_workspace_members,
         target: target.map(str::to_owned),
         cargo_lock_hash,
         crates,
@@ -625,7 +658,7 @@ fn validate_references(crates: &BTreeMap<String, NixCrate>) -> Result<()> {
         }
     }
     if !missing_refs.is_empty() {
-        eprintln!("ERROR: {} dangling dependency references:", missing_refs.len());
+        eprintln!("error: {} dangling dependency references:", missing_refs.len());
         for (from, to) in &missing_refs {
             let from_name = crates
                 .get(from)
@@ -1394,7 +1427,7 @@ mod tests {
             package: Some(vec![make_lock_pkg("dep", "0.2.0", Some("def456"))]),
         };
 
-        let plan = merge(&unit_graph, &metadata, &lock, None, "hash123".to_string(), None).unwrap();
+        let plan = merge(&unit_graph, &metadata, &lock, None, "hash123".to_string(), None, None).unwrap();
 
         assert_eq!(plan.version, BUILD_PLAN_VERSION);
         assert_eq!(plan.workspace_root, "/workspace");
@@ -1438,10 +1471,79 @@ mod tests {
 
         let lock = CargoLock { package: None };
 
-        let plan = merge(&unit_graph, &metadata, &lock, None, "hash".to_string(), None).unwrap();
+        let plan = merge(&unit_graph, &metadata, &lock, None, "hash".to_string(), None, None).unwrap();
 
         assert_eq!(plan.workspace_members.len(), 2);
         assert_eq!(plan.workspace_members.get("member_a"), Some(&"member_a#0.1.0".to_string()));
         assert_eq!(plan.workspace_members.get("member_b"), Some(&"member_b#0.2.0".to_string()));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Workspace filtering tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn merge_members_filter_selects_subset() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep")]),
+                make_unit("dep#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0, 2],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("member_a#0.1.0", None, "/workspace/a/Cargo.toml"),
+                make_meta_pkg("dep#0.3.0", Some("registry+https://github.com/rust-lang/crates.io-index"), "/reg/dep/Cargo.toml"),
+                make_meta_pkg("member_b#0.2.0", None, "/workspace/b/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string(), "member_b#0.2.0".to_string()],
+        };
+
+        let lock = CargoLock { package: None };
+        let filter = vec!["member_a".to_string()];
+
+        let plan = merge(&unit_graph, &metadata, &lock, None, "h".to_string(), None, Some(&filter)).unwrap();
+
+        // Only member_a in workspace_members and roots
+        assert_eq!(plan.workspace_members.len(), 1);
+        assert!(plan.workspace_members.contains_key("member_a"));
+        assert!(!plan.workspace_members.contains_key("member_b"));
+        assert_eq!(plan.roots.len(), 1);
+        assert_eq!(plan.roots[0], "member_a#0.1.0");
+
+        // All crates still present (needed as transitive deps)
+        assert_eq!(plan.crates.len(), 3);
+    }
+
+    #[test]
+    fn merge_members_filter_invalid_name_errors() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("member_a#0.1.0", None, "/workspace/a/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string()],
+        };
+
+        let lock = CargoLock { package: None };
+        let filter = vec!["nonexistent".to_string()];
+
+        let result = merge(&unit_graph, &metadata, &lock, None, "h".to_string(), None, Some(&filter));
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("unknown workspace member 'nonexistent'"), "got: {msg}");
+        assert!(msg.contains("member_a"), "should list valid members, got: {msg}");
     }
 }
