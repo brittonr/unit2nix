@@ -60,6 +60,21 @@ let
     else
       true;
 
+  # Cross-compilation target check: warn when the build plan's target triple
+  # doesn't match the pkgs host platform. This catches silent mismatches where
+  # e.g. an x86_64 plan is used with aarch64 pkgs (or vice versa).
+  planTarget = resolved.target or null;
+  hostConfig = pkgs.stdenv.hostPlatform.config;
+  _targetCheck =
+    if planTarget != null && planTarget != hostConfig then
+      builtins.trace
+        ("unit2nix: WARNING — build plan target '${planTarget}' differs from "
+          + "pkgs host platform '${hostConfig}'. "
+          + "For cross-compilation, use: pkgs.pkgsCross.<platform> or matching --target.")
+        true
+    else
+      true;
+
   fetchSource = import ./fetch-source.nix { inherit pkgs src; };
 
   # Build the recursive crate set for a given pkgs instance.
@@ -176,6 +191,7 @@ let
 
 in
 assert _stalenessCheck;
+assert _targetCheck;
 {
   # Workspace members keyed by crate name → { packageId, build }.
   # Uses the explicit workspaceMembers map from the JSON (set by cargo metadata),

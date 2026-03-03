@@ -158,6 +158,12 @@
 
           # Real-world validation: workspace with -sys crates (168 crates)
           validate-bat = import ./tests/bat/build.nix { inherit pkgs; };
+
+          # Real-world validation: pure Rust file finder (59 crates, jemalloc)
+          validate-fd = import ./tests/fd/build.nix { inherit pkgs; };
+
+          # Real-world validation: largest test — 519 crates, 29 workspace members
+          validate-nushell = import ./tests/nushell/build.nix { inherit pkgs; };
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           # VM integration tests (Linux only — requires QEMU/KVM)
           vm-sample-bin = import ./tests/vm/sample-bin.nix {

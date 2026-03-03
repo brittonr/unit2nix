@@ -131,6 +131,24 @@ Lessons:
 - Must `git add` new files (run.rs) before `nix build` — cleanSourceFilter excludes untracked
 - `str::char_indices().nth(n)` is the safe way to truncate a string by character count
 
+## Session: 2026-03-03 — Validation targets, cross-compilation, README fixes
+Changes made:
+- **Validation**: Added fd (59 crates, 1 workspace member, jemalloc-sys) — builds and runs
+- **Validation**: Added nushell (519 crates, 29 workspace members, sqlite+ring+rmcp) — builds and runs
+- **Cross-compilation**: Added target mismatch warning in build-from-unit-graph.nix — traces when build plan target ≠ pkgs.hostPlatform.config
+- **README**: Fixed test count 19 → 20
+- **README**: Updated tested projects table with fd and nushell
+- **README**: Enhanced cross-compilation docs with target mismatch warning, multiple code examples, and design rationale
+- **README**: Updated check count 7 → 9
+- **Flake**: Added validate-fd and validate-nushell checks
+- **Verification**: cargo test 20/20, cargo clippy 0 warnings, all 5 validation builds pass (sample, ripgrep, fd, bat, nushell)
+
+Lessons:
+- `RING_PREGENERATE_ASM=1` is WRONG — it tells ring to regenerate asm, which fails when pregenerated/ dir exists. Remove it; the source tarball ships pregenerated asm
+- `rmcp` crate uses `env!("CARGO_CRATE_NAME")` at compile time — buildRustCrate doesn't set this; must provide via override
+- nushell's build.rs reads `CARGO_CFG_FEATURE` — buildRustCrate doesn't set CARGO_CFG_* vars; must provide via override
+- fd's crate name is `fd-find` not `fd` (check workspaceMembers keys in the JSON)
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

@@ -252,13 +252,29 @@ buildFromUnitGraph {
 
 ### Cross-compilation
 
-Generate a build plan for the target:
+Cross-compilation requires two things: a build plan resolved for the target, and a nixpkgs instance configured for cross-compilation.
+
+**1. Generate a target-specific build plan:**
 
 ```bash
 unit2nix --target aarch64-unknown-linux-gnu -o build-plan-aarch64.json
 ```
 
-Use with cross-compilation pkgs:
+Cargo filters the unit graph to only include crates needed for that target — platform-specific dependencies (e.g., `winapi` on Linux) are excluded. The `--target` triple is stored in the JSON so the Nix consumer can validate it.
+
+**2. Use with cross-compilation pkgs:**
+
+```nix
+let
+  crossPkgs = pkgs.pkgsCross.aarch64-multiplatform;
+in buildFromUnitGraph {
+  pkgs = crossPkgs;
+  src = ./.;
+  resolvedJson = ./build-plan-aarch64.json;
+}
+```
+
+Or equivalently:
 
 ```nix
 let
@@ -269,6 +285,10 @@ in buildFromUnitGraph {
   resolvedJson = ./build-plan-aarch64.json;
 }
 ```
+
+**Target mismatch warning:** If the build plan's `--target` doesn't match `pkgs.stdenv.hostPlatform`, unit2nix emits a trace warning during evaluation. This catches silent mismatches (e.g., using an x86_64 plan with aarch64 pkgs).
+
+**Each target needs its own build plan** because Cargo resolves different dependency trees per target. This is by design — it means the Nix consumer never needs a `cfg()` evaluator.
 
 ## vs crate2nix
 
@@ -286,18 +306,20 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 
 ## Tested projects
 
-| Project | Crates | Notes |
-|---------|--------|-------|
-| sample_workspace | 15 | lib, bin, proc-macro, build-script |
-| [ripgrep](https://github.com/BurntSushi/ripgrep) | 34 | 9 workspace members, zero overrides needed |
-| [bat](https://github.com/sharkdp/bat) | 168 | -sys crates (libgit2-sys, libz-sys), custom build script |
-| Private 457-crate workspace | 457 | Full production build |
+| Project | Crates | Workspace members | Notes |
+|---------|--------|-------------------|-------|
+| sample_workspace | 15 | 4 | lib, bin, proc-macro, build-script |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | 34 | 9 | Pure Rust, zero overrides needed |
+| [fd](https://github.com/sharkdp/fd) | 59 | 1 | jemalloc-sys (vendored C build) |
+| [bat](https://github.com/sharkdp/bat) | 168 | 1 | -sys crates (libgit2-sys, libz-sys), custom build script |
+| [nushell](https://github.com/nushell/nushell) | 519 | 29 | Largest test — sqlite, ring, proc-macros |
+| Private workspace | 457 | — | Full production build |
 
 ## Testing
 
 ```bash
-cargo test              # 19 unit tests
-nix flake check         # 7 checks: sample build + bat/ripgrep validation + 3 NixOS VM tests
+cargo test              # 20 unit tests
+nix flake check         # 9 checks: sample build + fd/bat/ripgrep/nushell validation + 3 NixOS VM tests
 ```
 
 ## Requirements
