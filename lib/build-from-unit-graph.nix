@@ -21,8 +21,14 @@
   resolvedJson,
   # Optional: buildRustCrate override
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
-  # Optional: default crate overrides
-  defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+  # Optional: full override of the crate overrides base layer.
+  # When provided, replaces BOTH pkgs.defaultCrateOverrides AND unit2nix built-ins.
+  # For most users, use extraCrateOverrides instead.
+  defaultCrateOverrides ? null,
+  # Optional: additional crate overrides merged ON TOP of the default stack
+  # (pkgs.defaultCrateOverrides + unit2nix built-ins). Use this for project-specific
+  # -sys crate overrides without repeating well-known boilerplate.
+  extraCrateOverrides ? {},
   # Skip the Cargo.lock staleness check (default: false).
   # Set to true when src filtering strips Cargo.lock or for other edge cases.
   skipStalenessCheck ? false,
@@ -77,6 +83,23 @@ let
 
   fetchSource = import ./fetch-source.nix { inherit pkgs src; };
 
+  # Built-in crate overrides from unit2nix (ring, tikv-jemalloc-sys, etc.)
+  crateOverridesLib = import ./crate-overrides.nix { inherit pkgs; };
+
+  # Three-layer override merge:
+  #   1. pkgs.defaultCrateOverrides (nixpkgs community overrides)
+  #   2. unit2nix built-in overrides (crate-overrides.nix)
+  #   3. user extraCrateOverrides (project-specific)
+  #
+  # When defaultCrateOverrides is explicitly passed, it replaces layers 1+2.
+  mergedOverrides =
+    if defaultCrateOverrides != null then
+      # User took full control — use their base, merge extra on top
+      defaultCrateOverrides // extraCrateOverrides
+    else
+      # Default: nixpkgs → unit2nix built-ins → user extras
+      pkgs.defaultCrateOverrides // crateOverridesLib.overrides // extraCrateOverrides;
+
   # Build the recursive crate set for a given pkgs instance.
   mkBuiltByPackageIdByPkgs =
     cratePkgs:
@@ -85,10 +108,7 @@ let
         let
           base = buildRustCrateForPkgs cratePkgs;
         in
-        if defaultCrateOverrides != pkgs.defaultCrateOverrides then
-          base.override { defaultCrateOverrides = defaultCrateOverrides; }
-        else
-          base;
+        base.override { defaultCrateOverrides = mergedOverrides; };
 
       self = {
         # Each crate keyed by its full package ID
@@ -161,7 +181,23 @@ let
         };
 
       features = crateInfo.features or [ ];
+
+      # Warn about -sys crates with `links` that have no override configured.
+      linksValue = crateInfo.links or null;
+      hasLinks = linksValue != null;
+      hasOverride = mergedOverrides ? ${crateInfo.crateName};
+      isKnownNoOverride = hasLinks && crateOverridesLib.isKnownNoOverride crateInfo.crateName linksValue;
+      _linksWarning =
+        if hasLinks && !hasOverride && !isKnownNoOverride then
+          builtins.trace
+            ("unit2nix: WARNING — crate '${crateInfo.crateName}' has links=\"${linksValue}\""
+              + " but no override found. It may need native libraries."
+              + " See docs/sys-crate-overrides.md or use extraCrateOverrides.")
+            true
+        else
+          true;
     in
+    assert _linksWarning;
     buildRustCrate (
       {
         crateName = crateInfo.crateName;

@@ -38,7 +38,8 @@
             src,
             resolvedJson,
             buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
-            defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+            defaultCrateOverrides ? null,
+            extraCrateOverrides ? {},
             skipStalenessCheck ? false,
           }:
           import ./lib/build-from-unit-graph.nix {
@@ -48,6 +49,7 @@
               resolvedJson
               buildRustCrateForPkgs
               defaultCrateOverrides
+              extraCrateOverrides
               skipStalenessCheck
               ;
           };
@@ -60,7 +62,8 @@
             src,
             workspaceDir ? null,
             buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
-            defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+            defaultCrateOverrides ? null,
+            extraCrateOverrides ? {},
           }:
           import ./lib/auto.nix {
             inherit
@@ -69,6 +72,7 @@
               workspaceDir
               buildRustCrateForPkgs
               defaultCrateOverrides
+              extraCrateOverrides
               ;
             unit2nix = self.packages.${system}.unit2nix;
           };
@@ -122,6 +126,9 @@
             inherit (unwrapped) meta version;
           };
 
+        # Built-in crate overrides registry
+        crateOverridesLib = import ./lib/crate-overrides.nix { inherit pkgs; };
+
         # Sample workspace build
         sampleWorkspace = buildFromUnitGraph {
           inherit pkgs;
@@ -133,6 +140,10 @@
         # Library output
         lib = {
           inherit buildFromUnitGraph buildFromUnitGraphAuto;
+          # Built-in override registry — users can inspect/extend
+          crateOverrides = crateOverridesLib.overrides;
+          knownNoOverride = crateOverridesLib.knownNoOverride;
+          isKnownNoOverride = crateOverridesLib.isKnownNoOverride;
         };
 
         # Packages

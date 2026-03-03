@@ -11,6 +11,7 @@ mod cli;
 mod merge;
 mod metadata;
 mod output;
+mod overrides;
 mod prefetch;
 mod run;
 mod source;

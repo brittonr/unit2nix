@@ -168,7 +168,7 @@ buildFromUnitGraph {
   src;                                               # workspace source root
   resolvedJson;                                      # path to build-plan.json
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate; # override buildRustCrate
-  defaultCrateOverrides ? pkgs.defaultCrateOverrides; # crate-specific overrides
+  extraCrateOverrides ? {};                           # project-specific -sys overrides
   skipStalenessCheck ? false;                         # skip Cargo.lock hash check
 }
 ```
@@ -180,7 +180,7 @@ buildFromUnitGraphAuto {
   pkgs;                                              # nixpkgs instance
   src;                                               # workspace source root (must contain Cargo.lock)
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate; # override buildRustCrate
-  defaultCrateOverrides ? pkgs.defaultCrateOverrides; # crate-specific overrides
+  extraCrateOverrides ? {};                           # project-specific -sys overrides
 }
 ```
 
@@ -228,23 +228,22 @@ Returns:
 
 ### Crate overrides
 
-Crates with native C dependencies (`-sys` crates) need overrides to provide headers and libraries in the Nix sandbox. See [docs/sys-crate-overrides.md](docs/sys-crate-overrides.md) for a full guide with recipes for common crates.
+Common `-sys` crates work out of the box — unit2nix ships built-in overrides for `ring`, `tikv-jemalloc-sys`, `onig_sys`, and others, and inherits nixpkgs' overrides for `openssl-sys`, `libgit2-sys`, `libz-sys`, etc. Check coverage with:
 
-Quick example:
+```bash
+unit2nix --check-overrides -o build-plan.json
+```
+
+For project-specific crates, use `extraCrateOverrides`:
 
 ```nix
 buildFromUnitGraph {
   inherit pkgs src;
   resolvedJson = ./build-plan.json;
-  defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-    openssl-sys = attrs: {
+  extraCrateOverrides = {
+    my-custom-sys = attrs: {
       nativeBuildInputs = [ pkgs.pkg-config ];
-      buildInputs = [ pkgs.openssl.dev ];
-    };
-    libz-sys = attrs: {
-      nativeBuildInputs = [ pkgs.pkg-config ];
-      buildInputs = [ pkgs.zlib ];
-      LIBZ_SYS_STATIC = "0";
+      buildInputs = [ pkgs.some-library ];
     };
   };
 }
@@ -310,9 +309,9 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 |---------|--------|-------------------|-------|
 | sample_workspace | 15 | 4 | lib, bin, proc-macro, build-script |
 | [ripgrep](https://github.com/BurntSushi/ripgrep) | 34 | 9 | Pure Rust, zero overrides needed |
-| [fd](https://github.com/sharkdp/fd) | 59 | 1 | jemalloc-sys (vendored C build) |
-| [bat](https://github.com/sharkdp/bat) | 168 | 1 | -sys crates (libgit2-sys, libz-sys), custom build script |
-| [nushell](https://github.com/nushell/nushell) | 519 | 29 | Largest test — sqlite, ring, proc-macros |
+| [fd](https://github.com/sharkdp/fd) | 59 | 1 | Zero overrides — jemalloc-sys covered by built-ins |
+| [bat](https://github.com/sharkdp/bat) | 168 | 1 | Near-zero overrides — libgit2-sys, libz-sys, onig_sys all auto-covered |
+| [nushell](https://github.com/nushell/nushell) | 519 | 29 | Zero overrides — sqlite, ring auto-covered |
 | Private workspace | 457 | — | Full production build |
 
 ## Testing

@@ -21,30 +21,15 @@ let
     hash = "sha256-OBbm6x9ohOKcfBuI2ElcXN1JAVbaI229Gec6+tF+BxY=";
   };
 
+  # With unit2nix's three-layer override merge (nixpkgs + unit2nix built-ins + user),
+  # nushell needs no explicit overrides:
+  #   - libsqlite3-sys: covered by nixpkgs defaultCrateOverrides
+  #   - ring: covered by unit2nix built-in overrides
   ws = buildFromUnitGraph {
     inherit pkgs;
     src = nushellSrc;
     resolvedJson = ./build-plan.json;
     skipStalenessCheck = true;
-    defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-      # libsqlite3-sys: use system sqlite instead of vendored build.
-      libsqlite3-sys = attrs: {
-        nativeBuildInputs = [ pkgs.pkg-config ];
-        buildInputs = [ pkgs.sqlite ];
-        SQLITE3_LIB_DIR = "${pkgs.sqlite.out}/lib";
-        SQLITE3_INCLUDE_DIR = "${pkgs.sqlite.dev}/include";
-      };
-
-      # ring: build script compiles pregenerated assembly via cc.
-      # Do NOT set RING_PREGENERATE_ASM — that tries to regenerate asm
-      # files and fails when the pregenerated/ dir already exists.
-      ring = attrs: {
-        nativeBuildInputs = [ pkgs.perl ];
-        buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
-          pkgs.darwin.apple_sdk.frameworks.Security
-        ];
-      };
-    };
   };
 in
 ws.workspaceMembers."nu".build

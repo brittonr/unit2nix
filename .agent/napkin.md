@@ -164,6 +164,26 @@ Lessons:
 - These two env vars can be computed from the build plan JSON — `CARGO_CRATE_NAME` is crateName with `-` → `_`, `CARGO_CFG_FEATURE` is comma-separated features list
 - Flake template correctly produces `.gitignore` and `flake.nix` but overwrites existing `.gitignore` (nix warns about it)
 
+## Session: 2026-03-03 #3 — Sys crate override ergonomics
+Changes made:
+- **Built-in override registry**: New `lib/crate-overrides.nix` with overrides for 8 crates not in nixpkgs: ring, tikv-jemalloc-sys, jemalloc-sys, onig_sys, librocksdb-sys, zstd-sys, bzip2-sys, lzma-sys
+- **knownNoOverride set**: rayon-core, prettyplease, compiler_builtins, etc. plus `ring_core_*` prefix pattern — suppresses false-positive warnings
+- **Three-layer merge**: `pkgs.defaultCrateOverrides // unit2nix built-ins // extraCrateOverrides` — new default when `defaultCrateOverrides` is not explicitly passed
+- **extraCrateOverrides param**: New additive parameter on `buildFromUnitGraph` and `buildFromUnitGraphAuto` — users only write project-specific overrides
+- **Backward compat**: `defaultCrateOverrides` param still works — when passed, replaces layers 1+2 entirely
+- **Eval-time diagnostics**: `builtins.trace` warning for crates with `links` field and no matching override or knownNoOverride entry
+- **--check-overrides CLI**: Reads build plan JSON and prints coverage report — covered/no-override-needed/missing
+- **Deserialize support**: Added `Deserialize` to all output types for `--check-overrides` to read back build plan JSON
+- **Simplified test builds**: bat (removed 2 overrides), nushell (removed 2 overrides), fd (removed 1 override) — all now use defaults
+- **Documentation**: Rewrote sys-crate-overrides.md to lead with "works out of the box", updated README API docs and tested projects table
+- **Verification**: cargo test 20/20, cargo clippy 0 warnings, nix flake check all 9 checks pass
+
+Lessons:
+- nixpkgs' `defaultCrateOverrides` already covers ~60 crates including libgit2-sys, libz-sys, libsqlite3-sys, openssl-sys — don't duplicate those
+- `defaultCrateOverrides ? null` (not `? pkgs.defaultCrateOverrides`) to detect "user didn't pass it" vs "user passed nixpkgs defaults"
+- Build plan JSON needs `#[serde(default)]` on optional fields for backward-compatible deserialization of older plans
+- ring's `links` value is `ring_core_0_17_14_` (version-stamped), not `ring` — need prefix matching for knownNoOverride
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

@@ -3,10 +3,17 @@ use anyhow::{Context, Result};
 use crate::cargo;
 use crate::cli::Cli;
 use crate::merge;
+use crate::output::NixBuildPlan;
+use crate::overrides;
 use crate::prefetch;
 
 /// Shared entry point for both `unit2nix` and `cargo unit2nix`.
 pub fn run(cli: Cli) -> Result<()> {
+    // --check-overrides: read an existing build plan and report coverage
+    if cli.check_overrides {
+        return run_check_overrides(&cli);
+    }
+
     eprintln!("Running cargo build --unit-graph...");
     let unit_graph = cargo::run_unit_graph(&cli)?;
     eprintln!("  {} units, {} roots", unit_graph.units.len(), unit_graph.roots.len());
@@ -51,5 +58,22 @@ pub fn run(cli: Cli) -> Result<()> {
         None => println!("{json}"),
     }
 
+    Ok(())
+}
+
+/// Read an existing build plan JSON and check override coverage.
+fn run_check_overrides(cli: &Cli) -> Result<()> {
+    let path = cli
+        .output
+        .as_ref()
+        .context("--check-overrides requires -o <build-plan.json> to specify which plan to check")?;
+
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read build plan from {}", path.display()))?;
+
+    let plan: NixBuildPlan = serde_json::from_str(&contents)
+        .with_context(|| format!("failed to parse build plan from {}", path.display()))?;
+
+    overrides::check_overrides(&plan);
     Ok(())
 }

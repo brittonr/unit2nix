@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Schema version for the build plan JSON output.
 pub const BUILD_PLAN_VERSION: u32 = 1;
@@ -9,7 +9,7 @@ pub const BUILD_PLAN_VERSION: u32 = 1;
 /// Contains every crate in the dependency graph with its resolved features,
 /// dependencies, source info, and metadata. The Nix consumer walks this
 /// to build each crate individually with `buildRustCrate`.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixBuildPlan {
     pub version: u32,
@@ -18,16 +18,17 @@ pub struct NixBuildPlan {
     /// Workspace member name → package ID (from cargo metadata).
     pub workspace_members: BTreeMap<String, String>,
     /// Target triple this plan was resolved for (null = host).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     /// SHA256 hash of the Cargo.lock file content.
     /// Used by the Nix consumer to detect stale build plans.
+    #[serde(default)]
     pub cargo_lock_hash: String,
     pub crates: BTreeMap<String, NixCrate>,
 }
 
 /// A single crate in the build plan, with everything needed to build it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixCrate {
     pub crate_name: String,
@@ -46,20 +47,20 @@ pub struct NixCrate {
     pub crate_bin: Vec<NixBinTarget>,
     pub links: Option<String>,
     // Package metadata (for CARGO_PKG_* env vars in build scripts)
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authors: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
 }
 
 /// Where a crate's source comes from.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum NixSource {
     /// The default crates.io registry.
@@ -88,7 +89,7 @@ pub enum NixSource {
 }
 
 /// A dependency reference in the build plan.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixDep {
     pub package_id: String,
@@ -96,7 +97,7 @@ pub struct NixDep {
 }
 
 /// A binary target within a crate.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NixBinTarget {
     pub name: String,
     pub path: String,

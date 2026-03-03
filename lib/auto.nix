@@ -28,8 +28,11 @@
   workspaceDir ? null,
   # Optional: buildRustCrate override (forwarded to buildFromUnitGraph)
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
-  # Optional: default crate overrides (forwarded to buildFromUnitGraph)
-  defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+  # Optional: full override of the crate overrides base layer (forwarded to buildFromUnitGraph).
+  # When provided, replaces both pkgs.defaultCrateOverrides and unit2nix built-ins.
+  defaultCrateOverrides ? null,
+  # Optional: additional crate overrides on top of defaults (forwarded to buildFromUnitGraph)
+  extraCrateOverrides ? {},
 }:
 
 let
@@ -175,7 +178,7 @@ let
 
 in
 import ./build-from-unit-graph.nix {
-  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides;
+  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides;
   src = workspaceSrc;
   resolvedJson = generatedPlan;
   skipStalenessCheck = true;

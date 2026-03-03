@@ -19,22 +19,14 @@ let
     hash = "sha256-gi54cDL3qm01qaV9vlMWjyYbLUxicPFIAjji3DxXkAs=";
   };
 
+  # With unit2nix's three-layer override merge (nixpkgs + unit2nix built-ins + user),
+  # fd needs no explicit overrides:
+  #   - tikv-jemalloc-sys: covered by unit2nix built-in overrides
   ws = buildFromUnitGraph {
     inherit pkgs;
     src = fdSrc;
     resolvedJson = ./build-plan.json;
     skipStalenessCheck = true;
-    defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-      # tikv-jemalloc-sys vendors and builds jemalloc from source.
-      # It needs a C compiler (provided by buildRustCrate's stdenv)
-      # and make for the vendored build.
-      tikv-jemalloc-sys = attrs: {
-        nativeBuildInputs = [ pkgs.makeWrapper ];
-        buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
-          pkgs.darwin.apple_sdk.frameworks.Security
-        ];
-      };
-    };
   };
 in
 ws.workspaceMembers."fd-find".build

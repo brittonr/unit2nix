@@ -41,4 +41,9 @@ pub struct Cli {
     /// Output file (default: stdout)
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+
+    /// Check which -sys crates need native overrides, then exit.
+    /// Reads an existing build plan JSON (from -o) and reports coverage.
+    #[arg(long)]
+    pub check_overrides: bool,
 }
