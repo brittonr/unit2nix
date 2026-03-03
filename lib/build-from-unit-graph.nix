@@ -17,8 +17,10 @@
   lib ? pkgs.lib,
   # Workspace source root
   src,
-  # Path to the pre-resolved JSON file (from unit2nix)
-  resolvedJson,
+  # Path to the pre-resolved JSON file (from unit2nix) — required unless resolvedData is provided
+  resolvedJson ? null,
+  # Pre-resolved attrset (from plugin or other source) — alternative to resolvedJson
+  resolvedData ? null,
   # Optional: buildRustCrate override
   buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
   # Optional: full override of the crate overrides base layer.
@@ -43,7 +45,14 @@
 }:
 
 let
-  resolved = builtins.fromJSON (builtins.readFile resolvedJson);
+  # Accept either a file path (resolvedJson) or an already-parsed attrset (resolvedData)
+  resolved =
+    if resolvedData != null then
+      resolvedData
+    else if resolvedJson != null then
+      builtins.fromJSON (builtins.readFile resolvedJson)
+    else
+      throw "build-from-unit-graph.nix: either resolvedJson or resolvedData must be provided";
 
   # Staleness check: verify build-plan.json matches the current Cargo.lock.
   # Skipped when: check is disabled, hash is absent (old unit2nix), or Cargo.lock missing.

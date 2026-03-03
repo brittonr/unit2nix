@@ -21,8 +21,11 @@ fn cargo_lock_path(manifest_path: &Path) -> PathBuf {
 /// Creates a `Command::new("cargo")` with the given args plus
 /// `--manifest-path`, runs it, checks the exit status, and returns
 /// stdout bytes on success or bails with stderr on failure.
+///
+/// Respects the `CARGO` environment variable if set (standard Cargo convention).
 pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Result<Vec<u8>> {
-    let mut cmd = Command::new("cargo");
+    let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let mut cmd = Command::new(&cargo_bin);
     cmd.args(args);
     cmd.arg("--manifest-path").arg(manifest_path);
 

@@ -137,6 +137,48 @@
         # Built-in crate overrides registry
         crateOverridesLib = import ./lib/crate-overrides.nix { inherit pkgs; };
 
+        # Nix plugin for evaluator-based resolution (requires Nix 2.33)
+        unit2nixPlugin = pkgs.callPackage ./nix/plugin.nix {
+          nixComponents = pkgs.nixVersions.nixComponents_2_33;
+        };
+
+        # Plugin-based builder (requires plugin loaded)
+        buildFromUnitGraphPlugin =
+          {
+            pkgs ? nixpkgs.legacyPackages.${system},
+            src,
+            buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
+            defaultCrateOverrides ? null,
+            extraCrateOverrides ? {},
+            clippyArgs ? [],
+            members ? null,
+            target ? null,
+            includeDev ? false,
+            features ? null,
+            allFeatures ? false,
+            noDefaultFeatures ? false,
+            bin ? null,
+            package ? null,
+          }:
+          import ./lib/plugin.nix {
+            inherit
+              pkgs
+              src
+              buildRustCrateForPkgs
+              defaultCrateOverrides
+              extraCrateOverrides
+              clippyArgs
+              members
+              target
+              includeDev
+              features
+              allFeatures
+              noDefaultFeatures
+              bin
+              package
+              ;
+          };
+
         # Sample workspace build
         sampleWorkspace = buildFromUnitGraph {
           inherit pkgs;
@@ -147,7 +189,7 @@
       {
         # Library output
         lib = {
-          inherit buildFromUnitGraph buildFromUnitGraphAuto;
+          inherit buildFromUnitGraph buildFromUnitGraphAuto buildFromUnitGraphPlugin;
           # Built-in override registry — users can inspect/extend
           crateOverrides = crateOverridesLib.overrides;
           knownNoOverride = crateOverridesLib.knownNoOverride;
@@ -158,6 +200,7 @@
         packages = {
           default = unit2nix;
           inherit unit2nix;
+          inherit unit2nixPlugin;
           sample = sampleWorkspace.allWorkspaceMembers;
           sample-bin = sampleWorkspace.workspaceMembers."sample-bin".build;
         };

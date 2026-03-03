@@ -10,6 +10,11 @@ readme = "README.md"
 keywords = ["nix", "cargo", "build", "crate"]
 categories = ["development-tools::build-utils"]
 
+[lib]
+name = "unit2nix"
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
 [[bin]]
 name = "unit2nix"
 path = "src/main.rs"

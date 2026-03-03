@@ -5,22 +5,11 @@
 //! first argument. This wrapper strips that extra argument so clap sees the
 //! same flags as a direct `unit2nix` invocation.
 
-// Share all modules with the main binary.
-mod cargo;
-mod cli;
-mod merge;
-mod metadata;
-mod output;
-mod overrides;
-mod prefetch;
-mod run;
-mod source;
-mod unit_graph;
+use unit2nix::cli::Cli;
+use unit2nix::run;
 
 use anyhow::Result;
 use clap::Parser;
-
-use cli::Cli;
 
 fn main() -> Result<()> {
     // Strip the `unit2nix` subcommand arg that Cargo inserts.
