@@ -149,6 +149,21 @@ Lessons:
 - nushell's build.rs reads `CARGO_CFG_FEATURE` — buildRustCrate doesn't set CARGO_CFG_* vars; must provide via override
 - fd's crate name is `fd-find` not `fd` (check workspaceMembers keys in the JSON)
 
+## Session: 2026-03-03 #2 — Env var shim, template test, benchmarks, flake check
+Changes made:
+- **Env var shim**: build-from-unit-graph.nix now auto-sets `CARGO_CRATE_NAME` and `CARGO_CFG_FEATURE` for every crate build — eliminates need for per-crate overrides when crates use `env!()` or `std::env::var()` for these vars
+- **Removed overrides**: nushell test no longer needs rmcp/nu overrides (only sqlite + ring remain)
+- **Docs**: Updated sys-crate-overrides.md with env var shim documentation, ring `RING_PREGENERATE_ASM` warning, added nushell/fd as working examples
+- **Template test**: Verified `nix flake init -t` → `unit2nix -o build-plan.json` → `nix build` works end-to-end with a real serde project
+- **Benchmarks**: Refreshed generate/eval numbers (consistent: unit2nix eval 308ms ≈ crate2nix 311ms, crane 864ms, buildRustPackage 482ms)
+- **Full flake check**: All 9 checks pass including 3 VM tests (sample-bin, per-crate-caching, rebuild-isolation)
+- **Gitignore**: Added result-1 to .gitignore
+
+Lessons:
+- `buildRustCrate` sets `CARGO_FEATURE_*` (per-feature) and `CARGO_PKG_*` and `CARGO_CFG_TARGET_*` but NOT `CARGO_CRATE_NAME` or `CARGO_CFG_FEATURE`
+- These two env vars can be computed from the build plan JSON — `CARGO_CRATE_NAME` is crateName with `-` → `_`, `CARGO_CFG_FEATURE` is comma-separated features list
+- Flake template correctly produces `.gitignore` and `flake.nix` but overwrites existing `.gitignore` (nix warns about it)
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix
