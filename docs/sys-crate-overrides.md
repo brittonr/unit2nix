@@ -109,6 +109,8 @@ ring = attrs: {
 };
 ```
 
+> **Warning:** Do NOT set `RING_PREGENERATE_ASM = "1"`. That flag tells ring to *regenerate* assembly files, which fails when the source tarball's `pregenerated/` directory already exists. The source tarball ships pre-generated assembly — just let it use those.
+
 ## macOS-specific dependencies
 
 Some crates need Apple frameworks on macOS:
@@ -217,6 +219,23 @@ the-crate = attrs: {
 
 `buildRustCrate` provides a C compiler by default. If you still get linker errors, the library's `.pc` file or `-L` path may not be propagated. Check that `pkg-config` is in `nativeBuildInputs` and the library package provides a `.pc` file (usually the `.dev` output: `pkgs.openssl.dev`, not `pkgs.openssl`).
 
-## Full working example
+## Cargo env vars
 
-See [`tests/bat/build.nix`](../tests/bat/build.nix) for a complete example building [bat](https://github.com/sharkdp/bat) (168 crates) with overrides for `libgit2-sys` and `libz-sys`.
+unit2nix automatically sets `CARGO_CRATE_NAME` and `CARGO_CFG_FEATURE` for every crate build. These aren't provided by `buildRustCrate` upstream but are needed by some crates:
+
+- `CARGO_CRATE_NAME` — the crate name with `-` replaced by `_` (used by `env!("CARGO_CRATE_NAME")` at compile time)
+- `CARGO_CFG_FEATURE` — comma-separated list of enabled features (used by build scripts via `std::env::var("CARGO_CFG_FEATURE")`)
+
+If a crate needs other `CARGO_*` env vars that aren't set, provide them via overrides:
+
+```nix
+my-crate = attrs: {
+  CARGO_BIN_NAME = "my-binary";  # if the crate reads this at compile time
+};
+```
+
+## Full working examples
+
+- [`tests/bat/build.nix`](../tests/bat/build.nix) — [bat](https://github.com/sharkdp/bat) (168 crates) with overrides for `libgit2-sys` and `libz-sys`
+- [`tests/nushell/build.nix`](../tests/nushell/build.nix) — [nushell](https://github.com/nushell/nushell) (519 crates, 29 workspace members) with overrides for `libsqlite3-sys` and `ring`
+- [`tests/fd/build.nix`](../tests/fd/build.nix) — [fd](https://github.com/sharkdp/fd) (59 crates) with `tikv-jemalloc-sys` vendored build

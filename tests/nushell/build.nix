@@ -35,18 +35,6 @@ let
         SQLITE3_INCLUDE_DIR = "${pkgs.sqlite.dev}/include";
       };
 
-      # rmcp uses env!("CARGO_CRATE_NAME") at compile time, which cargo sets
-      # but buildRustCrate doesn't. Provide it manually.
-      rmcp = attrs: {
-        CARGO_CRATE_NAME = "rmcp";
-      };
-
-      # nu's build script reads CARGO_CFG_FEATURE to embed enabled features.
-      # buildRustCrate doesn't set CARGO_CFG_* vars — provide it manually.
-      nu = attrs: {
-        CARGO_CFG_FEATURE = builtins.concatStringsSep "," (attrs.features or [ ]);
-      };
-
       # ring: build script compiles pregenerated assembly via cc.
       # Do NOT set RING_PREGENERATE_ASM — that tries to regenerate asm
       # files and fails when the pregenerated/ dir already exists.

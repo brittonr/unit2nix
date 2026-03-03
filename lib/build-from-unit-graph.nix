@@ -159,6 +159,8 @@ let
         lib.optionalAttrs ((crateInfo.${field} or null) != null) {
           ${field} = crateInfo.${field};
         };
+
+      features = crateInfo.features or [ ];
     in
     buildRustCrate (
       {
@@ -166,11 +168,17 @@ let
         version = crateInfo.version;
         edition = crateInfo.edition or "2021";
         src = crateSrc;
-        inherit dependencies buildDependencies crateRenames;
-        features = crateInfo.features or [ ];
+        inherit dependencies buildDependencies crateRenames features;
         procMacro = crateInfo.procMacro or false;
         crateBin = crateInfo.crateBin or [ ];
         authors = crateInfo.authors or [ ];
+
+        # Cargo env vars that buildRustCrate doesn't set.
+        # These are needed by crates that use env!() or std::env::var() in
+        # build scripts or source (e.g., rmcp uses CARGO_CRATE_NAME,
+        # nushell's build.rs reads CARGO_CFG_FEATURE).
+        CARGO_CRATE_NAME = builtins.replaceStrings [ "-" ] [ "_" ] crateInfo.crateName;
+        CARGO_CFG_FEATURE = builtins.concatStringsSep "," features;
       }
       // optionalField "sha256"
       // optionalField "build"
