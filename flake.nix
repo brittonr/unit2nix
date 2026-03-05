@@ -70,6 +70,10 @@
             extraCrateOverrides ? {},
             clippyArgs ? [],
             members ? null,
+            # Optional: Rust toolchain for the IFD step (e.g. nightly from rust-overlay).
+            # `cargo --unit-graph` requires nightly. When set, this toolchain is
+            # prepended to PATH, overriding the stable cargo bundled in the unit2nix wrapper.
+            rustToolchain ? null,
           }:
           import ./lib/auto.nix {
             inherit
@@ -81,6 +85,7 @@
               extraCrateOverrides
               clippyArgs
               members
+              rustToolchain
               ;
             unit2nix = self.packages.${system}.unit2nix;
           };

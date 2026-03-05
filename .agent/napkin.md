@@ -281,6 +281,18 @@ Lessons:
 - Nix-side filtering via `filteredWorkspaceMembers` only affects the output attrset — internal crate graphs (builtCrates, testCrates, clippyCrates) still contain all crates for correct dep resolution
 - `--members` and `--package` are mutually exclusive — `--package` selects at cargo resolution level, `--members` filters post-resolution
 
+## Session: 2026-03-05 — Two fixes from drift migration
+
+Changes made:
+- **Issue 1 fix**: Added `rustToolchain` parameter to `auto.nix` and `buildFromUnitGraphAuto` in `flake.nix`. When set, prepends the toolchain to PATH in the IFD derivation, overriding the stable cargo/rustc from the unit2nix wrapper. Fixes `cargo --unit-graph` requiring nightly.
+- **Issue 2 fix**: Added `CARGO_ENCODED_RUSTFLAGS = ""` and `CARGO_CFG_TARGET_FEATURE = ""` to every crate build in `build-from-unit-graph.nix` (both `buildCrate` and `buildCrateWithDevDeps`). Fixes rav1e/av-scenechange panicking on `env::var("CARGO_ENCODED_RUSTFLAGS").unwrap()`.
+- **Verification**: cargo test 46/46, nix build sample succeeds
+
+Lessons:
+- `CARGO_ENCODED_RUSTFLAGS` is always set by cargo (empty by default) — crates can safely unwrap() on it. buildRustCrate didn't set it.
+- `CARGO_CFG_TARGET_FEATURE` is platform-dependent (e.g. "fxsr,sse,sse2" on x86_64) but empty string is safe default — crates gate SIMD behind specific features
+- The unit2nix wrapper's `--prefix PATH` puts stable cargo first unconditionally — only way to override is prepending to PATH inside the derivation
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

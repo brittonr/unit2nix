@@ -37,6 +37,11 @@
   clippyArgs ? [],
   # Optional: filter which workspace members are exposed (forwarded to buildFromUnitGraph)
   members ? null,
+  # Optional: Rust toolchain (e.g. nightly from rust-overlay) for the IFD step.
+  # The unit2nix wrapper bundles stable cargo/rustc, but `cargo --unit-graph`
+  # requires nightly. When set, this toolchain is prepended to PATH inside the
+  # IFD derivation, overriding the wrapper's stable cargo/rustc.
+  rustToolchain ? null,
 }:
 
 let
@@ -152,6 +157,12 @@ let
     nativeBuildInputs = [ unit2nix ] ++ lib.optional hasGitDeps pkgs.git;
     preferLocalBuild = true;
   } ''
+    ${lib.optionalString (rustToolchain != null) ''
+      # Prepend user-supplied toolchain (e.g. nightly) so it overrides the
+      # stable cargo/rustc bundled in the unit2nix wrapper.
+      export PATH="${rustToolchain}/bin:$PATH"
+    ''}
+
     # Set up vendored cargo home
     export CARGO_HOME=$(mktemp -d)
     mkdir -p "$CARGO_HOME"

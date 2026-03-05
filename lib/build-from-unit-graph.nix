@@ -263,6 +263,15 @@ let
         # nushell's build.rs reads CARGO_CFG_FEATURE).
         CARGO_CRATE_NAME = builtins.replaceStrings [ "-" ] [ "_" ] crateInfo.crateName;
         CARGO_CFG_FEATURE = builtins.concatStringsSep "," features;
+
+        # Cargo sets CARGO_ENCODED_RUSTFLAGS to the encoded rustflags (empty by
+        # default). Crates like rav1e and av-scenechange unwrap() on this var.
+        CARGO_ENCODED_RUSTFLAGS = "";
+
+        # Cargo sets CARGO_CFG_TARGET_FEATURE to comma-separated CPU features
+        # (e.g. "fxsr,sse,sse2" on x86_64). Empty is safe — crates that read
+        # this typically gate optional SIMD paths behind specific features.
+        CARGO_CFG_TARGET_FEATURE = "";
       }
       // optionalField "sha256"
       // optionalField "build"
@@ -397,6 +406,8 @@ let
         authors = crateInfo.authors or [ ];
         CARGO_CRATE_NAME = builtins.replaceStrings [ "-" ] [ "_" ] crateInfo.crateName;
         CARGO_CFG_FEATURE = builtins.concatStringsSep "," features;
+        CARGO_ENCODED_RUSTFLAGS = "";
+        CARGO_CFG_TARGET_FEATURE = "";
       }
       // optionalField "sha256"
       // optionalField "build"
