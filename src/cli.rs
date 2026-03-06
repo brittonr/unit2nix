@@ -78,3 +78,13 @@ pub struct Cli {
     #[arg(long)]
     pub json: bool,
 }
+
+impl Cli {
+    /// Parse the `--members` flag into a filter list, if set.
+    #[must_use]
+    pub fn members_filter(&self) -> Option<Vec<String>> {
+        self.members
+            .as_ref()
+            .map(|m| m.split(',').map(|s| s.trim().to_string()).collect())
+    }
+}

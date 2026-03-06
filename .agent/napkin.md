@@ -293,6 +293,35 @@ Lessons:
 - `CARGO_CFG_TARGET_FEATURE` is platform-dependent (e.g. "fxsr,sse,sse2" on x86_64) but empty string is safe default — crates gate SIMD behind specific features
 - The unit2nix wrapper's `--prefix PATH` puts stable cargo first unconditionally — only way to override is prepending to PATH inside the derivation
 
+## Session: 2026-03-05 #2 — Dead code & antipattern cleanup
+Changes made:
+- **Soundness (ffi.rs)**: `CString::new().unwrap()` in `extern "C"` → `cstring_or_fallback()` helper that never panics across FFI boundary; also handles serialization failure gracefully instead of `.unwrap()`
+- **Soundness (ffi.rs)**: Added comment on `set_var` documenting single-threaded Nix evaluator assumption
+- **DRY (cargo.rs)**: Extracted `append_common_args()` — eliminates ~20 LOC of duplicated flag-building between `run_unit_graph` and `run_test_unit_graph`
+- **DRY (cli.rs)**: Added `Cli::members_filter()` method — eliminates duplicated members-parsing in `run.rs` and `ffi.rs`
+- **DRY (merge.rs)**: Extracted `apply_members_filter()` — reduces `merge()` from 118 to ~95 lines (under clippy's 100-line limit)
+- **DRY (build-from-unit-graph.nix)**: Collapsed `buildCrateWithDevDeps` into `buildCrate` with `{ includeDevDeps ? false }` parameter — eliminates ~80 LOC of duplicated Nix code
+- **Dead code (vendor.nix)**: Removed `gitSources = []` and its `++ gitSources` concatenation
+- **Antipattern (prefetch.rs)**: `.expect("pkg_id was collected from this map")` → `.ok_or_else(|| anyhow!(...))? ` for proper `Result` propagation
+- **Antipattern (overrides.rs)**: `known_no_override()` and `known_no_override_prefixes()` functions → `const` slices (avoid allocation on every call)
+- **Antipattern (overrides.rs)**: `print_override_report` `.expect()` → `match` with `eprintln!` fallback
+- **Shell safety (auto.nix)**: `--members ${...}` → `--members ${lib.escapeShellArg ...}`
+- **Clippy nursery/pedantic → 0 warnings**:
+  - `Eq` derives added to `UnitMode` and `CrateKind`
+  - `#[must_use]` on 8 functions/methods
+  - `const fn` on 3 `CrateKind` methods
+  - `unwrap_or(fn_call)` → `unwrap_or_else(|| ...)` in 3 places
+  - `# Errors` doc section on 11 public `Result`-returning functions
+  - `# Panics` doc section on `merge()`
+  - `#[allow(clippy::option_if_let_else)]` on `resolve_source` (readability)
+- **Verification**: cargo test 46/46, cargo clippy (all+pedantic+nursery) 0 warnings, `nix build` + `nix build .#sample` pass
+
+Lessons:
+- `CString::new()` can panic on embedded NUL bytes — never use `.unwrap()` in `extern "C"` functions
+- `CString::from_vec_unchecked` needs the NUL stripped from input (it adds its own)
+- Nix functions can take attrsets as "optional parameters" via `{ includeDevDeps ? false }:` — cleaner than boolean positional args
+- `const fn` in Rust can use `matches!()` macro and `||` in const context
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

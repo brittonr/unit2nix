@@ -45,12 +45,15 @@ fn parse_git_url(s: &str) -> Option<ParsedGitUrl> {
 ///   (shouldn't happen in practice; local deps always have a `manifest_path`).
 /// - `Err(...)` — unknown or malformed source type. Callers should fall back to
 ///   `infer_source_from_pkg_id` or propagate the error.
+///
+/// # Errors
+/// Returns an error for unknown or malformed source strings.
 pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &str) -> Result<Option<NixSource>> {
     match source {
         None => {
             // Local path dependency — compute relative path from workspace root
             let manifest = std::path::Path::new(manifest_path);
-            let crate_dir = manifest.parent().unwrap_or(std::path::Path::new("."));
+            let crate_dir = manifest.parent().unwrap_or_else(|| std::path::Path::new("."));
             let ws = std::path::Path::new(workspace_root);
             let rel = crate_dir.strip_prefix(ws).map_or_else(
                 |_| crate_dir.to_string_lossy().into_owned(),
@@ -92,6 +95,7 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
 /// Cargo stores git checkouts at `~/.cargo/git/checkouts/<name>/<hash>/`.
 /// If the crate's Cargo.toml is at `.../checkouts/<name>/<hash>/sub/path/Cargo.toml`,
 /// this returns `Some("sub/path")`. Returns `None` if the crate is at the repo root.
+#[must_use]
 pub fn compute_git_subdir(manifest_path: &str) -> Option<String> {
     // Look for the checkouts/<name>/<hash>/ pattern
     let parts: Vec<&str> = manifest_path.split('/').collect();
@@ -126,6 +130,7 @@ pub fn compute_git_subdir(manifest_path: &str) -> Option<String> {
 /// - `path+file:///...#version` → local
 /// - `git+https://...?rev=HASH#name@version` → git (rev from query param)
 /// - `git+https://...#HASH` → git (rev from fragment)
+#[must_use]
 pub fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
     if pkg_id.starts_with("registry+https://github.com/rust-lang/crates.io-index") {
         Some(NixSource::CratesIo)

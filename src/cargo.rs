@@ -12,7 +12,7 @@ use crate::metadata::{CargoMetadata, CargoLock};
 fn cargo_lock_path(manifest_path: &Path) -> PathBuf {
     manifest_path
         .parent()
-        .unwrap_or(Path::new("."))
+        .unwrap_or_else(|| Path::new("."))
         .join("Cargo.lock")
 }
 
@@ -23,6 +23,10 @@ fn cargo_lock_path(manifest_path: &Path) -> PathBuf {
 /// stdout bytes on success or bails with stderr on failure.
 ///
 /// Respects the `CARGO` environment variable if set (standard Cargo convention).
+///
+/// # Errors
+/// Returns an error if the cargo command fails to execute or exits with
+/// a non-zero status code.
 pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Result<Vec<u8>> {
     let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut cmd = Command::new(&cargo_bin);
@@ -55,16 +59,8 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
     Ok(output.stdout)
 }
 
-/// Run `cargo build --unit-graph` and parse the result.
-pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
-    let mut args: Vec<&str> = vec![
-        "build",
-        "--unit-graph",
-        "-Z",
-        "unstable-options",
-        "--locked",
-    ];
-
+/// Append common CLI flags (features, target, bin, package) to an args vector.
+fn append_common_args<'a>(args: &mut Vec<&'a str>, cli: &'a Cli) {
     if let Some(features) = cli.features.as_deref() {
         args.extend_from_slice(&["--features", features]);
     }
@@ -83,6 +79,21 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     if let Some(target) = cli.target.as_deref() {
         args.extend_from_slice(&["--target", target]);
     }
+}
+
+/// Run `cargo build --unit-graph` and parse the result.
+///
+/// # Errors
+/// Returns an error if cargo fails or the output is not valid unit graph JSON.
+pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
+    let mut args: Vec<&str> = vec![
+        "build",
+        "--unit-graph",
+        "-Z",
+        "unstable-options",
+        "--locked",
+    ];
+    append_common_args(&mut args, cli);
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo build --unit-graph")?;
     serde_json::from_slice(&stdout).context("failed to parse unit graph JSON")
@@ -92,6 +103,9 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 ///
 /// Like `run_unit_graph` but uses `test` instead of `build`, which includes
 /// dev-dependencies and test targets in the unit graph.
+///
+/// # Errors
+/// Returns an error if cargo fails or the output is not valid unit graph JSON.
 pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     let mut args: Vec<&str> = vec![
         "test",
@@ -101,31 +115,16 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
         "--locked",
         "--no-run",
     ];
-
-    if let Some(features) = cli.features.as_deref() {
-        args.extend_from_slice(&["--features", features]);
-    }
-    if cli.all_features {
-        args.push("--all-features");
-    }
-    if cli.no_default_features {
-        args.push("--no-default-features");
-    }
-    if let Some(bin) = cli.bin.as_deref() {
-        args.extend_from_slice(&["--bin", bin]);
-    }
-    if let Some(package) = cli.package.as_deref() {
-        args.extend_from_slice(&["--package", package]);
-    }
-    if let Some(target) = cli.target.as_deref() {
-        args.extend_from_slice(&["--target", target]);
-    }
+    append_common_args(&mut args, cli);
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo test --unit-graph")?;
     serde_json::from_slice(&stdout).context("failed to parse test unit graph JSON")
 }
 
 /// Run `cargo metadata` and parse the result.
+///
+/// # Errors
+/// Returns an error if cargo fails or the output is not valid metadata JSON.
 pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
     let args = ["metadata", "--format-version=1", "--locked"];
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo metadata")?;
@@ -133,6 +132,9 @@ pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
 }
 
 /// Read and parse the Cargo.lock file.
+///
+/// # Errors
+/// Returns an error if `Cargo.lock` is missing or not valid TOML.
 pub fn read_cargo_lock(manifest_path: &Path) -> Result<CargoLock> {
     let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read_to_string(&lock_path)
@@ -150,6 +152,9 @@ pub fn read_cargo_lock(manifest_path: &Path) -> Result<CargoLock> {
 /// Returns a hex-encoded hash string. The Nix consumer compares this
 /// against `builtins.hashFile "sha256"` of the workspace's Cargo.lock
 /// to detect stale build plans.
+///
+/// # Errors
+/// Returns an error if `Cargo.lock` cannot be read.
 pub fn hash_cargo_lock(manifest_path: &Path) -> Result<String> {
     let lock_path = cargo_lock_path(manifest_path);
     let content = std::fs::read(&lock_path)

@@ -41,24 +41,20 @@ pub struct OverrideReport {
 }
 
 /// Crates whose `links` field is Rust-internal and never need native overrides.
-fn known_no_override() -> &'static [&'static str] {
-    &[
-        "rayon-core",
-        "prettyplease",
-        "compiler_builtins",
-        "rustc-std-workspace-core",
-        "rustc-std-workspace-alloc",
-    ]
-}
+const KNOWN_NO_OVERRIDE: &[&str] = &[
+    "rayon-core",
+    "prettyplease",
+    "compiler_builtins",
+    "rustc-std-workspace-core",
+    "rustc-std-workspace-alloc",
+];
 
 /// Prefix patterns for links values that are Rust-internal.
-fn known_no_override_prefixes() -> &'static [&'static str] {
-    &["ring_core_"]
-}
+const KNOWN_NO_OVERRIDE_PREFIXES: &[&str] = &["ring_core_"];
 
 fn is_known_no_override(crate_name: &str, links_value: &str) -> bool {
-    known_no_override().contains(&crate_name)
-        || known_no_override_prefixes()
+    KNOWN_NO_OVERRIDE.contains(&crate_name)
+        || KNOWN_NO_OVERRIDE_PREFIXES
             .iter()
             .any(|prefix| links_value.starts_with(prefix))
 }
@@ -108,6 +104,7 @@ fn known_crates() -> BTreeMap<&'static str, KnownCrate> {
 }
 
 /// Analyze override coverage for a build plan and return a structured report.
+#[must_use]
 pub fn check_overrides(plan: &NixBuildPlan) -> OverrideReport {
     let registry = known_crates();
 
@@ -173,12 +170,16 @@ pub fn check_overrides(plan: &NixBuildPlan) -> OverrideReport {
 }
 
 /// Print an override report in human-readable or JSON format.
+///
+/// # Panics
+/// Panics if JSON serialization of the report fails (should never happen
+/// for this type).
 pub fn print_override_report(report: &OverrideReport, json: bool) {
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(report).expect("failed to serialize override report")
-        );
+        match serde_json::to_string_pretty(report) {
+            Ok(s) => println!("{s}"),
+            Err(e) => eprintln!("error: failed to serialize override report: {e}"),
+        }
         return;
     }
 

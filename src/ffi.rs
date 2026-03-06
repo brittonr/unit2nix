@@ -10,11 +10,14 @@ use crate::merge;
 use crate::output::NixBuildPlan;
 
 /// Cargo binary path baked in at build time from the Nix store.
-/// Falls back to "cargo" (from PATH) when not set.
+/// Falls back to "cargo" (from `PATH`) when not set.
 const BUILTIN_CARGO_PATH: &str = match option_env!("UNIT2NIX_CARGO_PATH") {
     Some(p) => p,
     None => "cargo",
 };
+
+/// Static fallback for when `CString::new()` fails (embedded NUL in error message).
+const FALLBACK_ERROR: &[u8] = b"internal error: error message contained NUL byte\0";
 
 /// Input from the Nix side — the entire attrset serialized as JSON.
 #[derive(serde::Deserialize)]
@@ -48,9 +51,11 @@ struct PluginInput {
     members: Option<String>,
 }
 
-/// Resolve a Cargo workspace via unit-graph and return a NixBuildPlan.
+/// Resolve a Cargo workspace via unit-graph and return a [`NixBuildPlan`].
 fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
-    // Set CARGO env var so cargo::run_cargo uses the baked-in path
+    // Note: set_var is not thread-safe (POSIX setenv races with getenv).
+    // This is acceptable here because the Nix plugin evaluator calls primops
+    // from a single-threaded evaluation context.
     std::env::set_var("CARGO", BUILTIN_CARGO_PATH);
 
     // Construct a Cli struct to pass to cargo functions
@@ -70,10 +75,7 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
         json: false,
     };
 
-    // Parse members filter
-    let members_filter: Option<Vec<String>> = cli.members.as_ref().map(|m| {
-        m.split(',').map(|s| s.trim().to_string()).collect()
-    });
+    let members_filter = cli.members_filter();
 
     // Run cargo commands
     let unit_graph = cargo::run_unit_graph(&cli)
@@ -114,11 +116,27 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
     Ok(plan)
 }
 
+/// Create a `CString` from a string, falling back to a static error message
+/// if the string contains an embedded NUL byte. Prevents panicking in FFI.
+fn cstring_or_fallback(s: String) -> CString {
+    CString::new(s).unwrap_or_else(|_| {
+        // SAFETY: FALLBACK_ERROR is a valid NUL-terminated byte string with no interior NULs.
+        unsafe { CString::from_vec_unchecked(FALLBACK_ERROR[..FALLBACK_ERROR.len() - 1].to_vec()) }
+    })
+}
+
 /// Resolve a Cargo workspace. Input and output are JSON strings.
 ///
 /// # Safety
 /// `input_json` must be a valid null-terminated C string.
 /// The returned strings must be freed with `free_string`.
+///
+/// # Errors
+/// Returns 1 and sets `err_out` on invalid input, parse failure, or resolution error.
+///
+/// # Panics
+/// Does not panic — all error paths use `cstring_or_fallback` to avoid
+/// panicking across the FFI boundary.
 #[no_mangle]
 pub unsafe extern "C" fn resolve_unit_graph(
     input_json: *const c_char,
@@ -128,7 +146,7 @@ pub unsafe extern "C" fn resolve_unit_graph(
     let input_str = match unsafe { CStr::from_ptr(input_json) }.to_str() {
         Ok(s) => s,
         Err(e) => {
-            let msg = CString::new(format!("Invalid UTF-8 in input: {e}")).unwrap();
+            let msg = cstring_or_fallback(format!("Invalid UTF-8 in input: {e}"));
             unsafe { *err_out = msg.into_raw() };
             return 1;
         }
@@ -137,7 +155,7 @@ pub unsafe extern "C" fn resolve_unit_graph(
     let input: PluginInput = match serde_json::from_str(input_str) {
         Ok(v) => v,
         Err(e) => {
-            let msg = CString::new(format!("Failed to parse plugin input: {e}")).unwrap();
+            let msg = cstring_or_fallback(format!("Failed to parse plugin input: {e}"));
             unsafe { *err_out = msg.into_raw() };
             return 1;
         }
@@ -145,13 +163,20 @@ pub unsafe extern "C" fn resolve_unit_graph(
 
     match resolve_impl(&input) {
         Ok(plan) => {
-            let json = serde_json::to_string(&plan).unwrap();
-            let cstr = CString::new(json).unwrap();
+            let json = match serde_json::to_string(&plan) {
+                Ok(j) => j,
+                Err(e) => {
+                    let msg = cstring_or_fallback(format!("Failed to serialize output: {e}"));
+                    unsafe { *err_out = msg.into_raw() };
+                    return 1;
+                }
+            };
+            let cstr = cstring_or_fallback(json);
             unsafe { *out = cstr.into_raw() };
             0
         }
         Err(e) => {
-            let msg = CString::new(e).unwrap();
+            let msg = cstring_or_fallback(e);
             unsafe { *err_out = msg.into_raw() };
             1
         }

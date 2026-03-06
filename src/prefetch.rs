@@ -16,6 +16,10 @@ struct PrefetchGitResult {
 ///
 /// This produces a fixed-output hash that `pkgs.fetchgit` can use,
 /// enabling pure flake evaluation without `--impure`.
+///
+/// # Errors
+/// Returns an error if `nix-prefetch-git` is not found, fails, or
+/// produces unparseable output.
 pub fn prefetch_git(url: &str, rev: &str) -> Result<String> {
     let output = match Command::new("nix-prefetch-git")
         .args(["--url", url, "--rev", rev, "--fetch-submodules", "--quiet"])
@@ -53,6 +57,9 @@ pub fn prefetch_git(url: &str, rev: &str) -> Result<String> {
 ///
 /// Deduplicates by (url, rev) so each git repo is fetched at most once,
 /// even if multiple crates come from the same repo (monorepo deps).
+///
+/// # Errors
+/// Returns an error if any git source fails to prefetch.
 pub fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
     // Collect unique (url, rev) pairs that need prefetching
     let mut to_prefetch: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
@@ -80,8 +87,11 @@ pub fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
 
         // Apply the hash to all crates from this repo
         for pkg_id in pkg_ids {
-            if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut plan.crates.get_mut(pkg_id)
-                .expect("pkg_id was collected from this map").source {
+            let crate_info = plan
+                .crates
+                .get_mut(pkg_id)
+                .ok_or_else(|| anyhow::anyhow!("internal error: pkg_id {pkg_id} missing from build plan during prefetch"))?;
+            if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut crate_info.source {
                 *hash = Some(sha256.clone());
             }
         }

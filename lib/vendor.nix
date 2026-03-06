@@ -179,11 +179,9 @@ let
   # We export the repo list for auto.nix to consume.
   gitCheckouts = lib.mapAttrsToList (_: repo: repo) gitRepos;
 
-  gitSources = [];
-
   # --- vendor directory + config ---
 
-  vendoredSources = pkgs.linkFarm "cargo-vendor" (cratesIoSources ++ gitSources);
+  vendoredSources = pkgs.linkFarm "cargo-vendor" cratesIoSources;
 
   # Generate cargo config.
   # crates-io deps are redirected to the vendor directory.

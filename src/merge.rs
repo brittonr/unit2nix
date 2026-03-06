@@ -59,6 +59,7 @@ fn sanitize_metadata(s: &str) -> String {
 }
 
 /// Resolve source info for a crate, preferring metadata over `pkg_id` inference.
+#[allow(clippy::option_if_let_else)]
 fn resolve_source(
     pkg_id: &str,
     crate_name: &str,
@@ -142,7 +143,7 @@ fn build_nix_crate(
     // Crate root directory (from manifest_path, strip Cargo.toml)
     let crate_root = meta_pkg
         .and_then(|m| Path::new(&m.manifest_path).parent())
-        .unwrap_or(Path::new(""));
+        .unwrap_or_else(|| Path::new(""));
 
     let lib_path = lib_unit
         .map(|(_, lu)| make_relative(&lu.target.src_path, crate_root))
@@ -231,6 +232,14 @@ fn build_nix_crate(
 /// When `test_unit_graph` is provided (from `cargo test --unit-graph`), any
 /// packages and dependencies that appear in the test graph but not the build
 /// graph are emitted as `devDependencies` on the relevant workspace members.
+///
+/// # Errors
+/// Returns an error if package IDs are malformed, dependency references
+/// are dangling, or a requested `members_filter` name is invalid.
+///
+/// # Panics
+/// Panics if a root index is out of range in the unit graph (indicates
+/// a corrupt unit graph from cargo).
 pub fn merge(
     unit_graph: &UnitGraph,
     metadata: &CargoMetadata,
@@ -347,37 +356,8 @@ pub fn merge(
 
     validate_references(&crates)?;
 
-    // Apply workspace member filtering (--members flag)
-    let (filtered_roots, filtered_workspace_members) = if let Some(filter) = members_filter {
-        // Validate all requested names exist
-        let valid_names: Vec<&str> = workspace_members.keys().map(String::as_str).collect();
-        for name in filter {
-            if !workspace_members.contains_key(name) {
-                bail!(
-                    "unknown workspace member '{name}'. Valid members: {}",
-                    valid_names.join(", ")
-                );
-            }
-        }
-
-        // Filter workspace_members to only requested names
-        let filtered_wm: BTreeMap<String, String> = workspace_members
-            .into_iter()
-            .filter(|(name, _)| filter.contains(name))
-            .collect();
-
-        // Filter roots to only package IDs of selected members
-        let member_pkg_ids: std::collections::HashSet<&str> =
-            filtered_wm.values().map(String::as_str).collect();
-        let filtered_roots: Vec<String> = roots
-            .into_iter()
-            .filter(|r| member_pkg_ids.contains(r.as_str()))
-            .collect();
-
-        (filtered_roots, filtered_wm)
-    } else {
-        (roots, workspace_members)
-    };
+    let (filtered_roots, filtered_workspace_members) =
+        apply_members_filter(roots, workspace_members, members_filter)?;
 
     Ok(NixBuildPlan {
         version: BUILD_PLAN_VERSION,
@@ -388,6 +368,46 @@ pub fn merge(
         cargo_lock_hash,
         crates,
     })
+}
+
+/// Apply workspace member filtering (--members flag).
+///
+/// When `filter` is `Some`, validates requested names exist and returns only
+/// matching members and their roots. When `None`, passes through unchanged.
+fn apply_members_filter(
+    roots: Vec<String>,
+    workspace_members: BTreeMap<String, String>,
+    filter: Option<&[String]>,
+) -> Result<(Vec<String>, BTreeMap<String, String>)> {
+    let Some(filter) = filter else {
+        return Ok((roots, workspace_members));
+    };
+
+    // Validate all requested names exist
+    let valid_names: Vec<&str> = workspace_members.keys().map(String::as_str).collect();
+    for name in filter {
+        if !workspace_members.contains_key(name) {
+            bail!(
+                "unknown workspace member '{name}'. Valid members: {}",
+                valid_names.join(", ")
+            );
+        }
+    }
+
+    // Filter workspace_members to only requested names
+    let filtered_wm: BTreeMap<String, String> = workspace_members
+        .into_iter()
+        .filter(|(name, _)| filter.contains(name))
+        .collect();
+
+    // Filter roots to only package IDs of selected members
+    let member_pkg_ids: HashSet<&str> = filtered_wm.values().map(String::as_str).collect();
+    let filtered_roots: Vec<String> = roots
+        .into_iter()
+        .filter(|r| member_pkg_ids.contains(r.as_str()))
+        .collect();
+
+    Ok((filtered_roots, filtered_wm))
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,10 @@ use crate::overrides::{self, print_override_report};
 use crate::prefetch;
 
 /// Shared entry point for both `unit2nix` and `cargo unit2nix`.
+///
+/// # Errors
+/// Returns an error if cargo commands fail, merge produces invalid output,
+/// or the output file cannot be written.
 pub fn run(cli: &Cli) -> Result<()> {
     // --check-overrides: read an existing build plan and report coverage
     if cli.check_overrides {
@@ -19,9 +23,7 @@ pub fn run(cli: &Cli) -> Result<()> {
         bail!("--members and --package cannot be used together");
     }
 
-    let members_filter: Option<Vec<String>> = cli.members.as_ref().map(|m| {
-        m.split(',').map(|s| s.trim().to_string()).collect()
-    });
+    let members_filter = cli.members_filter();
 
     eprintln!("Running cargo build --unit-graph...");
     let unit_graph = cargo::run_unit_graph(cli)?;

@@ -189,7 +189,7 @@ let
     cd source
 
     unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
-      ${lib.optionalString (members != null) "--members ${builtins.concatStringsSep "," members}"}
+      ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"}
   '';
 
 in

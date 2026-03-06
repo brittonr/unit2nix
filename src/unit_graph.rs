@@ -25,7 +25,7 @@ pub struct Unit {
 }
 
 /// The compilation mode of a unit.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum UnitMode {
     /// Normal compilation: produces a library or binary artifact.
@@ -54,7 +54,7 @@ pub struct UnitTarget {
 }
 
 /// The kind of a crate target, as reported by Cargo.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CrateKind {
     Lib,
@@ -72,43 +72,51 @@ pub enum CrateKind {
 
 impl CrateKind {
     /// True for library-like kinds: lib, rlib, cdylib, dylib, staticlib.
-    pub fn is_lib(&self) -> bool {
+    #[must_use]
+    pub const fn is_lib(&self) -> bool {
         matches!(self, Self::Lib | Self::Rlib | Self::Cdylib | Self::Dylib | Self::Staticlib)
     }
 
     /// True if this is a procedural macro.
-    pub fn is_proc_macro(&self) -> bool {
+    #[must_use]
+    pub const fn is_proc_macro(&self) -> bool {
         matches!(self, Self::ProcMacro)
     }
 
     /// True for library-like or proc-macro kinds (targets that produce a linkable artifact).
-    pub fn is_lib_like(&self) -> bool {
+    #[must_use]
+    pub const fn is_lib_like(&self) -> bool {
         self.is_lib() || self.is_proc_macro()
     }
 }
 
 impl UnitTarget {
     /// True if any kind is a library type (lib, rlib, cdylib, dylib, staticlib).
+    #[must_use]
     pub fn has_lib(&self) -> bool {
         self.kind.iter().any(CrateKind::is_lib)
     }
 
     /// True if any kind is proc-macro.
+    #[must_use]
     pub fn has_proc_macro(&self) -> bool {
         self.kind.iter().any(CrateKind::is_proc_macro)
     }
 
     /// True if any kind is library-like or proc-macro.
+    #[must_use]
     pub fn has_lib_like(&self) -> bool {
         self.kind.iter().any(CrateKind::is_lib_like)
     }
 
     /// True if any kind is bin.
+    #[must_use]
     pub fn has_bin(&self) -> bool {
         self.kind.iter().any(|k| matches!(k, CrateKind::Bin))
     }
 
     /// True if any kind is custom-build (build script).
+    #[must_use]
     pub fn has_custom_build(&self) -> bool {
         self.kind.iter().any(|k| matches!(k, CrateKind::CustomBuild))
     }

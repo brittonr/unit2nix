@@ -154,7 +154,7 @@ let
       self = {
         # Each crate keyed by its full package ID
         crates = lib.mapAttrs (
-          packageId: _: buildCrate self cratePkgs buildRustCrate packageId
+          packageId: _: buildCrate self cratePkgs buildRustCrate packageId {}
         ) resolved.crates;
 
         # For proc-macro / build-dep host platform builds
@@ -164,8 +164,12 @@ let
     self;
 
   # Build a single crate derivation.
+  #
+  # When `includeDevDeps` is true, devDependencies are appended to the
+  # dependency list. This is used by the test build path for workspace members.
   buildCrate =
     self: cratePkgs: buildRustCrate: packageId:
+    { includeDevDeps ? false }:
     let
       crateInfo = resolved.crates.${packageId};
 
@@ -186,11 +190,14 @@ let
       # into the build script which executes at build time, not on the target).
       buildDepDrv = dep: self.build.crates.${dep.packageId};
 
-      dependencies = map depDrv (crateInfo.dependencies or [ ]);
+      normalDeps = crateInfo.dependencies or [ ];
+      devDeps = if includeDevDeps then (crateInfo.devDependencies or [ ]) else [ ];
+
+      dependencies = map depDrv (normalDeps ++ devDeps);
       buildDependencies = map buildDepDrv (crateInfo.buildDependencies or [ ]);
 
       # Compute crate renames: when externCrateName differs from the dep's crateName
-      allDeps = (crateInfo.dependencies or [ ]) ++ (crateInfo.buildDependencies or [ ]);
+      allDeps = normalDeps ++ devDeps ++ (crateInfo.buildDependencies or [ ]);
       renamedDeps = builtins.filter (
         dep:
         let
@@ -321,12 +328,12 @@ let
             hasDevDepsForCrate = (crateInfo.devDependencies or []) != [];
           in
           if isWorkspaceMember && hasDevDepsForCrate then
-            # Rebuild workspace members with dev deps added to dependencies
-            buildCrateWithDevDeps self cratePkgs buildRustCrate packageId
+            # Rebuild workspace members with dev deps included
+            buildCrate self cratePkgs buildRustCrate packageId { includeDevDeps = true; }
           else if isWorkspaceMember then
             # Workspace member without dev deps — still rebuild to link against
             # siblings that may have different dep sets
-            buildCrate self cratePkgs buildRustCrate packageId
+            buildCrate self cratePkgs buildRustCrate packageId {}
           else
             normalBuilt.crates.${packageId}
         ) resolved.crates;
@@ -334,94 +341,6 @@ let
       };
     in
     self;
-
-  # Build a crate with dev dependencies included (for workspace members only).
-  buildCrateWithDevDeps =
-    self: cratePkgs: buildRustCrate: packageId:
-    let
-      crateInfo = resolved.crates.${packageId};
-
-      depDrv =
-        dep:
-        let
-          depInfo = resolved.crates.${dep.packageId} or null;
-          isProcMacro = depInfo != null && (depInfo.procMacro or false);
-        in
-        if isProcMacro then
-          self.build.crates.${dep.packageId}
-        else
-          self.crates.${dep.packageId};
-
-      buildDepDrv = dep: self.build.crates.${dep.packageId};
-
-      # Include both regular and dev dependencies
-      dependencies = map depDrv (
-        (crateInfo.dependencies or [ ]) ++ (crateInfo.devDependencies or [ ])
-      );
-      buildDependencies = map buildDepDrv (crateInfo.buildDependencies or [ ]);
-
-      allDeps = (crateInfo.dependencies or [ ])
-        ++ (crateInfo.devDependencies or [ ])
-        ++ (crateInfo.buildDependencies or [ ]);
-      renamedDeps = builtins.filter (
-        dep:
-        let
-          depInfo = resolved.crates.${dep.packageId} or null;
-          depCrateName = if depInfo != null then
-            builtins.replaceStrings [ "-" ] [ "_" ] depInfo.crateName
-          else
-            dep.externCrateName;
-        in
-        dep.externCrateName != depCrateName
-      ) allDeps;
-
-      crateRenames =
-        let
-          grouped = lib.groupBy (dep: (resolved.crates.${dep.packageId}).crateName) renamedDeps;
-          versionAndRename = dep: {
-            rename = dep.externCrateName;
-            version = (resolved.crates.${dep.packageId}).version;
-          };
-        in
-        lib.mapAttrs (_name: builtins.map versionAndRename) grouped;
-
-      crateSrc = fetchSource crateInfo;
-
-      optionalField = field:
-        lib.optionalAttrs ((crateInfo.${field} or null) != null) {
-          ${field} = crateInfo.${field};
-        };
-
-      features = crateInfo.features or [ ];
-    in
-    buildRustCrate (
-      {
-        crateName = crateInfo.crateName;
-        version = crateInfo.version;
-        edition = crateInfo.edition or "2021";
-        src = crateSrc;
-        inherit dependencies buildDependencies crateRenames features;
-        procMacro = crateInfo.procMacro or false;
-        crateBin = crateInfo.crateBin or [ ];
-        authors = crateInfo.authors or [ ];
-        CARGO_CRATE_NAME = builtins.replaceStrings [ "-" ] [ "_" ] crateInfo.crateName;
-        CARGO_CFG_FEATURE = builtins.concatStringsSep "," features;
-        CARGO_ENCODED_RUSTFLAGS = "";
-        CARGO_CFG_TARGET_FEATURE = "";
-      }
-      // optionalField "sha256"
-      // optionalField "build"
-      // optionalField "libPath"
-      // optionalField "libName"
-      // optionalField "links"
-      // lib.optionalAttrs ((crateInfo.libCrateTypes or [ ]) != [ ]) {
-        type = crateInfo.libCrateTypes;
-      }
-      // optionalField "description"
-      // optionalField "homepage"
-      // optionalField "license"
-      // optionalField "repository"
-    );
 
   testCrates = if hasDevDeps then mkTestBuiltByPkgs pkgs else builtCrates;
 
@@ -486,7 +405,7 @@ let
         crates = lib.mapAttrs (
           packageId: _:
           if lib.elem packageId workspaceMemberIds then
-            buildCrate self cratePkgs clippyBuildRustCrate packageId
+            buildCrate self cratePkgs clippyBuildRustCrate packageId {}
           else
             normalBuilt.crates.${packageId}
         ) resolved.crates;
