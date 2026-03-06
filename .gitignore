@@ -1,7 +1,18 @@
-/target
+# Rust build artifacts
 **/target
+
+# Nix build result symlinks
 result
-.pi/
+result-*
+
+# direnv cache
+.direnv/
+
+# pi agent runtime state (skills/prompts are tracked)
+.pi/prompt-history.jsonl
+
+# openspec working directory
 openspec/
+
+# benchmark results (generated)
 benches/results/
-result-1
