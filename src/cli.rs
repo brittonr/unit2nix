@@ -81,6 +81,14 @@ pub struct Cli {
     /// report instead of the human-readable table.
     #[arg(long)]
     pub json: bool,
+
+    /// Force regeneration even if the build plan appears up to date.
+    ///
+    /// By default, unit2nix skips regeneration when all input files
+    /// (Cargo.lock, Cargo.toml) and CLI flags are unchanged since the
+    /// last run. Use this flag to bypass the check.
+    #[arg(long)]
+    pub force: bool,
 }
 
 impl Cli {

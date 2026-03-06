@@ -24,6 +24,10 @@ pub struct NixBuildPlan {
     /// Used by the Nix consumer to detect stale build plans.
     #[serde(default)]
     pub cargo_lock_hash: String,
+    /// SHA256 fingerprint of all inputs (Cargo.lock, Cargo.toml files, CLI flags,
+    /// unit2nix version). Used by the CLI to skip regeneration when inputs are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs_hash: Option<String>,
     pub crates: BTreeMap<String, NixCrate>,
 }
 

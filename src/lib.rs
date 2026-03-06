@@ -4,6 +4,7 @@
 
 pub mod cargo;
 pub mod cli;
+pub mod fingerprint;
 pub mod merge;
 pub mod metadata;
 pub mod output;

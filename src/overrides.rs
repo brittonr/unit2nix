@@ -238,6 +238,7 @@ mod tests {
             workspace_members: BTreeMap::new(),
             target: None,
             cargo_lock_hash: String::new(),
+            inputs_hash: None,
             crates: plan_crates,
         }
     }

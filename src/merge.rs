@@ -369,6 +369,7 @@ pub fn merge(
         workspace_members: filtered_workspace_members,
         target: target.map(str::to_owned),
         cargo_lock_hash,
+        inputs_hash: None, // set by run() after merge
         crates,
     })
 }

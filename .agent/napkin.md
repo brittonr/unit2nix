@@ -356,6 +356,24 @@ Lessons:
 - `file -b` output format for cross binaries: `ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, ...`
 - Build scripts execute on build platform during cross builds — verified by `sample-build-script` successfully building for aarch64
 
+## Session: 2026-03-05 #5 — Incremental plan updates
+Changes made:
+- **New module `src/fingerprint.rs`**: Computes SHA256 of all inputs that affect the build plan — unit2nix version, CLI flags (features, target, package, bin, members, include-dev, all-features, no-default-features), Cargo.lock content, and all Cargo.toml files in the workspace tree
+- **Skip-if-unchanged**: `run()` now computes inputs fingerprint before running cargo commands. If existing build plan has matching `inputsHash`, prints "Build plan is up to date" and exits immediately
+- **`--force` flag**: Bypasses the fingerprint check and always regenerates
+- **`inputsHash` field**: New optional field in `NixBuildPlan` output (JSON: `inputsHash`). Stored when writing to file, omitted when `--stdout`
+- **`--stdout` always generates**: No fingerprint check when piping to stdout
+- **Backward compat**: Old plans without `inputsHash` are always regenerated (field is `Option`, `serde(default)`)
+- **Workspace walk**: `collect_cargo_tomls()` recursively finds all Cargo.toml files, skipping `target/`, `.git/`, `node_modules/` — sorted for determinism
+- **Tests**: 10 new tests (fingerprint determinism, SHA256 format, CLI flag sensitivity ×3, missing/no-field/present hash read, Cargo.toml collection, target skip)
+- **Verification**: cargo test 58/58, cargo clippy pedantic 0 warnings, nix build + nix flake check 16/16 all pass
+
+Lessons:
+- `tempfile` crate needed as dev-dependency for tests that write temporary plan JSON files
+- `#[must_use]` on `compute_inputs_hash` is a useful lint — the hash is meaningless if not compared
+- `serde_json::Value` is lighter than full `NixBuildPlan` deserialization for reading a single field from existing plans
+- Fingerprint check is harmless in Nix auto mode — the output file doesn't exist yet, so it falls through to generation
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::cargo;
 use crate::cli::Cli;
+use crate::fingerprint;
 use crate::merge;
 use crate::output::NixBuildPlan;
 use crate::overrides::{self, print_override_report};
@@ -22,6 +23,25 @@ pub fn run(cli: &Cli) -> Result<()> {
     if cli.members.is_some() && cli.package.is_some() {
         bail!("--members and --package cannot be used together");
     }
+
+    // Compute inputs fingerprint for incremental skipping.
+    // Skip the check when writing to stdout (user wants the output regardless).
+    let inputs_hash = if cli.stdout {
+        None
+    } else {
+        let hash = fingerprint::compute_inputs_hash(cli)?;
+        if !cli.force {
+            if let Some(existing) = fingerprint::read_existing_inputs_hash(&cli.output) {
+                if existing == hash {
+                    eprintln!(
+                        "Build plan is up to date (use --force to regenerate)"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        Some(hash)
+    };
 
     let members_filter = cli.members_filter();
 
@@ -70,6 +90,9 @@ pub fn run(cli: &Cli) -> Result<()> {
 
     // Prefetch git sources for pure flake evaluation
     prefetch::prefetch_git_sources(&mut plan)?;
+
+    // Store the inputs fingerprint so the next run can skip if unchanged
+    plan.inputs_hash = inputs_hash;
 
     let json = serde_json::to_string_pretty(&plan)?;
 
