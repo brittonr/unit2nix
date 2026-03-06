@@ -13,8 +13,6 @@ On a 457-crate workspace:
 
 ## How it works
 
-Cargo already knows how to resolve dependencies, expand features, and filter by platform. unit2nix just asks it:
-
 ```
 cargo build --unit-graph ─┐
 cargo metadata ───────────┼─→ unit2nix ─→ build-plan.json
