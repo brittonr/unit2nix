@@ -30,7 +30,7 @@ nix run github:brittonr/unit2nix
 nix build
 ```
 
-Regenerate whenever `Cargo.toml` or `Cargo.lock` changes. A `Cargo.lock` hash is embedded in the plan — eval fails if they drift.
+The build plan embeds a `Cargo.lock` hash. If `Cargo.toml` or `Cargo.lock` changes, re-run `unit2nix` — Nix eval fails on hash mismatch.
 
 ## Flake integration
 
