@@ -20,7 +20,7 @@ Cargo.lock checksums ─────┤
 nix-prefetch-git ─────────┘   (git deps only)
 ```
 
-The JSON feeds a thin Nix file (~500 lines) that wires up `buildRustCrate` calls. No `cfg()` evaluator, no feature resolver, no reimplemented dependency logic.
+The Nix side reads the JSON and calls `buildRustCrate` for each crate.
 
 ## Quick start
 
@@ -204,7 +204,7 @@ Also available as `cargo unit2nix`.
 | Cross-compilation | One JSON per target | One JSON, filtered at eval |
 | Stability | Nightly (needs `--unit-graph`) | Stable Rust |
 
-unit2nix needs nightly Cargo but delegates resolution, features, and platform filtering to Cargo instead of reimplementing them.
+unit2nix requires nightly Cargo for `--unit-graph`.
 
 ## Tested on
 
