@@ -2,8 +2,6 @@
 
 Per-crate Nix builds from Cargo's unit graph.
 
-Crane and `buildRustPackage` treat your entire dependency tree as one big derivation. Change one line in `Cargo.lock` and everything rebuilds. unit2nix generates a separate `buildRustCrate` derivation for each crate, so Nix can cache them independently.
-
 On a 457-crate workspace:
 
 | What changed | unit2nix rebuilds | Crane rebuilds |
