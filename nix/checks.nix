@@ -48,6 +48,20 @@
     cp report.json $out
   '';
 
+  # Flake-parts module test: verify the module produces correct outputs
+  flake-parts-module = import ../tests/flake-parts/build.nix { inherit pkgs self; };
+
+  # Overlay smoke test: build sample workspace via pkgs.unit2nix overlay
+  overlay-smoke =
+    let
+      overlayedPkgs = pkgs.extend (import ../nix/overlay.nix { inherit self; });
+      ws = overlayedPkgs.unit2nix.buildFromUnitGraph {
+        src = ./.. + "/sample_workspace";
+        resolvedJson = ./.. + "/sample_workspace/build-plan.json";
+      };
+    in
+    ws.allWorkspaceMembers;
+
   # Real-world validation: pure Rust workspace (34 crates)
   validate-ripgrep = import ../tests/ripgrep/build.nix { inherit pkgs; };
 

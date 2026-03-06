@@ -3,6 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-parts = {
+      url = "github:hercules-ci/flake-parts";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -175,6 +179,10 @@
         description = "Rust project with unit2nix per-crate Nix builds";
         path = ./templates/default;
       };
+
+      overlays.default = import ./nix/overlay.nix { inherit self; };
+
+      flakeModules.default = import ./flake-modules/default.nix { unit2nixFlake = self; };
 
       lib = pick "lib";
       packages = pick "packages";

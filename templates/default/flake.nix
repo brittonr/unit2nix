@@ -82,4 +82,47 @@
         # '';
       }
     );
+
+  # --- Alternative: flake-parts module (least boilerplate) ---
+  #
+  # Replace this entire file with the following if you use flake-parts:
+  #
+  # {
+  #   inputs = {
+  #     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  #     flake-parts.url = "github:hercules-ci/flake-parts";
+  #     unit2nix.url = "github:brittonr/unit2nix";
+  #   };
+  #
+  #   outputs = inputs@{ flake-parts, ... }:
+  #     flake-parts.lib.mkFlake { inherit inputs; } {
+  #       imports = [ inputs.unit2nix.flakeModules.default ];
+  #       systems = [ "x86_64-linux" "aarch64-linux" ];
+  #
+  #       unit2nix = {
+  #         enable = true;
+  #         src = ./.;
+  #         resolvedJson = ./build-plan.json;
+  #         defaultPackage = "my-crate";
+  #       };
+  #     };
+  # }
+  #
+  # This auto-wires: packages, checks (clippy + tests), devShell, apps.
+  # See: https://github.com/brittonr/unit2nix#or-use-the-flake-parts-module-least-boilerplate
+
+  # --- Alternative: nixpkgs overlay ---
+  #
+  # Use the overlay to get pkgs.unit2nix (no system threading):
+  #
+  # let
+  #   pkgs = import nixpkgs {
+  #     system = "x86_64-linux";
+  #     overlays = [ unit2nix.overlays.default ];
+  #   };
+  #   ws = pkgs.unit2nix.buildFromUnitGraph {
+  #     src = ./.;
+  #     resolvedJson = ./build-plan.json;
+  #   };
+  # in ws.workspaceMembers."my-crate".build
 }

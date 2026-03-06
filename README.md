@@ -126,6 +126,72 @@ Auto mode uses IFD to generate the build plan at eval time — no `build-plan.js
 }
 ```
 
+### Or use the nixpkgs overlay
+
+The overlay puts unit2nix on `pkgs.unit2nix` — no `system` threading needed:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    unit2nix.url = "github:brittonr/unit2nix";
+  };
+
+  outputs = { nixpkgs, unit2nix, ... }:
+    let
+      pkgs = import nixpkgs {
+        system = "x86_64-linux";
+        overlays = [ unit2nix.overlays.default ];
+      };
+      ws = pkgs.unit2nix.buildFromUnitGraph {
+        src = ./.;
+        resolvedJson = ./build-plan.json;
+      };
+    in {
+      packages.x86_64-linux.default = ws.workspaceMembers."my-crate".build;
+    };
+}
+```
+
+The overlay provides `pkgs.unit2nix.{cli, buildFromUnitGraph, buildFromUnitGraphAuto, crateOverrides, isKnownNoOverride}`. Since `pkgs` is implicit, you don't need to pass it — though you can override it for cross-compilation.
+
+### Or use the flake-parts module (least boilerplate)
+
+The [flake-parts](https://flake.parts) module auto-wires `packages`, `checks`, `devShells`, and `apps` from a few lines of config:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    unit2nix.url = "github:brittonr/unit2nix";
+  };
+
+  outputs = inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ inputs.unit2nix.flakeModules.default ];
+      systems = [ "x86_64-linux" "aarch64-linux" ];
+
+      unit2nix = {
+        enable = true;
+        src = ./.;
+        resolvedJson = ./build-plan.json;  # null for auto mode
+        defaultPackage = "my-bin";         # or null for allWorkspaceMembers
+      };
+    };
+}
+```
+
+This gives you:
+- `packages.default` — your main binary (or all workspace members)
+- `packages.<name>` — one per workspace member
+- `checks.unit2nix-clippy` — clippy on all workspace members
+- `checks.unit2nix-tests` — runs `#[test]` functions
+- `devShells.default` — shell with `unit2nix`, `cargo`, `rustc`, `rust-analyzer`
+- `apps.update-plan` — regenerate `build-plan.json` (manual mode only)
+
+See all options: `enable`, `src`, `resolvedJson`, `workspaceDir`, `defaultPackage`, `members`, `extraCrateOverrides`, `checks.{clippy, tests, overrides}`, `devShell.{enable, extraPackages}`, `rustToolchain`.
+
 ### Or import directly (no flake input needed)
 
 ```nix
@@ -366,7 +432,7 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 
 ```bash
 cargo test              # 48 unit tests
-nix flake check         # 16 checks: sample build/clippy/test + override coverage + fd/bat/ripgrep/nushell validation + cross-compilation + 3 NixOS VM tests
+nix flake check         # 18 checks: sample build/clippy/test + overlay/module smoke tests + override coverage + fd/bat/ripgrep/nushell validation + cross-compilation + 3 NixOS VM tests
 ```
 
 ## Requirements
@@ -391,7 +457,9 @@ src/
   prefetch.rs                   # Git dependency SHA256 prefetching
 lib/build-from-unit-graph.nix   # Nix consumer (buildRustCrate wiring)
 lib/fetch-source.nix            # Source fetching (local, crates.io, git+subdir)
-flake.nix                       # Flake with lib, packages, checks, devshell
+nix/overlay.nix                 # Nixpkgs overlay (pkgs.unit2nix.*)
+flake-modules/default.nix       # Flake-parts module (auto-wires packages/checks/devShell)
+flake.nix                       # Flake with lib, packages, checks, overlays, flakeModules
 tests/vm/                       # NixOS VM integration tests
 sample_workspace/               # 4-crate test workspace (lib, bin, proc-macro, build-script)
 ```

@@ -374,6 +374,24 @@ Lessons:
 - `serde_json::Value` is lighter than full `NixBuildPlan` deserialization for reading a single field from existing plans
 - Fingerprint check is harmless in Nix auto mode — the output file doesn't exist yet, so it falls through to generation
 
+## Session: 2026-03-05 #6 — Nixpkgs overlay and flake-parts module
+Changes made:
+- **Overlay**: New `nix/overlay.nix` — `final: prev:` overlay putting `unit2nix.{cli, buildFromUnitGraph, buildFromUnitGraphAuto, crateOverrides, isKnownNoOverride}` on `pkgs.unit2nix`. `pkgs` is implicit (defaults to `final`).
+- **Flake-parts module**: New `flake-modules/default.nix` — full flake-parts module with options for `enable`, `src`, `resolvedJson`, `workspaceDir`, `defaultPackage`, `members`, `extraCrateOverrides`, `checks.{clippy, tests, overrides}`, `devShell.{enable, extraPackages}`, `rustToolchain`
+- **Module auto-wires**: `packages.default`, `packages.<name>` per member, `checks.unit2nix-clippy`, `checks.unit2nix-tests`, `devShells.default`, `apps.update-plan`
+- **Auto mode**: Module uses `buildFromUnitGraphAuto` when `resolvedJson = null`
+- **Flake.nix**: Added `flake-parts` input (with `nixpkgs-lib.follows`), `overlays.default`, `flakeModules.default` outputs
+- **Tests**: `overlay-smoke` check (builds sample via overlay), `flake-parts-module` check (verifies all module outputs)
+- **Documentation**: README sections for overlay usage and flake-parts module, template updated with alternatives
+- **Verification**: cargo test 58/58, nix flake check 18/18 (16 original + 2 new)
+
+Lessons:
+- Must `git add` new .nix files before `nix eval` — flake's `self` is the git tree
+- Overlay applies to `final` via `pkgs.extend overlay` — cleaner than `import nixpkgs { overlays = [...]; }`
+- Flake-parts module takes closure `{ unit2nixFlake }` to capture the overlay source — consumer imports it via `inputs.unit2nix.flakeModules.default`
+- `flake-parts` input with `nixpkgs-lib.follows = "nixpkgs"` avoids duplicate nixpkgs eval
+- `nix flake show` reports `flakeModules` as `unknown` type — expected, not an error
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix
