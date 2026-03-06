@@ -60,6 +60,12 @@
   # Real-world validation: largest test — 519 crates, 29 workspace members
   validate-nushell = import ../tests/nushell/build.nix { inherit pkgs; };
 }
+// pkgs.lib.optionalAttrs (pkgs.stdenv.isLinux && pkgs.stdenv.isx86_64) {
+  # Cross-compilation: x86_64 → aarch64 via pkgsCross
+  validate-cross-aarch64 = import ../tests/cross/build.nix {
+    inherit pkgs unit2nix;
+  };
+}
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
   # VM integration tests (Linux only — requires QEMU/KVM)
   vm-sample-bin = import ../tests/vm/sample-bin.nix {

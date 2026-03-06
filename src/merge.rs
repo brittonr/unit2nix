@@ -1414,6 +1414,42 @@ mod tests {
     }
 
     #[test]
+    fn merge_target_propagates_to_plan() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_pkg#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("ws_pkg#0.1.0", None, "/workspace/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_pkg#0.1.0".to_string()],
+        };
+
+        let lock = CargoLock { package: None };
+
+        // With target set
+        let plan = merge(
+            &unit_graph, &metadata, &lock,
+            Some("aarch64-unknown-linux-gnu"),
+            "hash".to_string(), None, None,
+        ).unwrap();
+        assert_eq!(plan.target, Some("aarch64-unknown-linux-gnu".to_string()));
+
+        // Without target
+        let plan_no_target = merge(
+            &unit_graph, &metadata, &lock,
+            None,
+            "hash".to_string(), None, None,
+        ).unwrap();
+        assert_eq!(plan_no_target.target, None);
+    }
+
+    #[test]
     fn merge_members_filter_invalid_name_errors() {
         let unit_graph = UnitGraph {
             units: vec![

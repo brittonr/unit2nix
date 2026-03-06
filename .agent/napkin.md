@@ -341,6 +341,21 @@ Lessons:
 - Feature-gating a module with `#[cfg(feature = "ffi")]` cleanly separates plugin-only code from CLI code without affecting the rlib
 - `Default` derive on output types enables struct update syntax in tests — dramatic boilerplate reduction with no runtime cost
 
+## Session: 2026-03-05 #4 — Cross-compilation test
+Changes made:
+- **Rust test**: `merge_target_propagates_to_plan` — verifies `target` field round-trips through `merge()` (both `Some("aarch64-unknown-linux-gnu")` and `None`)
+- **Nix test**: `tests/cross/build.nix` — IFD generates aarch64 build plan from sample workspace, builds with `pkgsCross.aarch64-multiplatform`, validates output binary is `ELF 64-bit ARM aarch64`
+- **Flake check**: `validate-cross-aarch64` in `nix/checks.nix`, gated behind `isLinux && isx86_64`
+- **README**: Updated test/check counts (48 tests, 16 checks), noted cross-compilation CI validation
+- **Verification**: cargo test 48/48, nix flake check 16/16
+
+Lessons:
+- IFD derivations for `unit2nix` need vendored crate sources — can't access network in sandbox. Must use `vendor.nix` to create `CARGO_HOME` with vendored deps + `config.toml`
+- `pkgsCross.aarch64-multiplatform` is well-supported in nixpkgs — cross builds "just work" for pure Rust crates
+- Proc-macros correctly route to build platform: `sample-macro` compiles as x86_64 `.so`, `sample-bin` compiles with `--target aarch64-unknown-linux-gnu` and links against the x86_64 proc-macro
+- `file -b` output format for cross binaries: `ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, ...`
+- Build scripts execute on build platform during cross builds — verified by `sample-build-script` successfully building for aarch64
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

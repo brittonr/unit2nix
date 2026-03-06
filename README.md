@@ -335,6 +335,8 @@ in buildFromUnitGraph {
 
 **Each target needs its own build plan** because Cargo resolves different dependency trees per target. This is by design — it means the Nix consumer never needs a `cfg()` evaluator.
 
+Cross-compilation is validated in CI: the sample workspace (including proc-macro and build script) is cross-compiled to aarch64 on every `nix flake check`.
+
 ## vs crate2nix
 
 | | unit2nix | crate2nix |
@@ -363,8 +365,8 @@ unit2nix trades Cargo API stability (nightly requirement) for correctness (Cargo
 ## Testing
 
 ```bash
-cargo test              # 44 unit tests
-nix flake check         # 14 checks: sample build/clippy/test + override coverage + fd/bat/ripgrep/nushell validation + 3 NixOS VM tests
+cargo test              # 48 unit tests
+nix flake check         # 16 checks: sample build/clippy/test + override coverage + fd/bat/ripgrep/nushell validation + cross-compilation + 3 NixOS VM tests
 ```
 
 ## Requirements
