@@ -42,6 +42,10 @@
   # requires nightly. When set, this toolchain is prepended to PATH inside the
   # IFD derivation, overriding the wrapper's stable cargo/rustc.
   rustToolchain ? null,
+  # Pass --workspace to cargo for per-crate test support.
+  # When true, ALL workspace members are resolved (including dev-deps),
+  # enabling test.check.<member> for every crate in the workspace.
+  workspace ? false,
 }:
 
 let
@@ -189,6 +193,7 @@ let
     cd source
 
     unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
+      ${lib.optionalString workspace "--workspace"} \
       ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"}
   '';
 

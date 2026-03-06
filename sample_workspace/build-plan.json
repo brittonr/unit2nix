@@ -13,7 +13,8 @@
     "sample-lib": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-lib#0.1.0",
     "sample-macro": "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-macro#0.1.0"
   },
-  "cargoLockHash": "8e58decdd1c18b95ab278e9e4162bb0ad67d6b3efbbfe5fc0b7094cc12db869c",
+  "cargoLockHash": "30b50b1ac7ba7e7283062792fbb5e33c867be1689250c1e4ef15da9d26f24be4",
+  "inputsHash": "446e4bc8e205e992f8f81698ff6fb49ba30a2f6044b795b69e44bb24ad8ec995",
   "crates": {
     "path+file:///home/brittonr/git/unit2nix/sample_workspace/sample-bin#0.1.0": {
       "crateName": "sample-bin",
@@ -40,6 +41,12 @@
         }
       ],
       "buildDependencies": [],
+      "devDependencies": [
+        {
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#pretty_assertions@1.4.1",
+          "externCrateName": "pretty_assertions"
+        }
+      ],
       "procMacro": false,
       "build": null,
       "libPath": null,
@@ -300,11 +307,11 @@
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dtolnay/proc-macro2"
     },
-    "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.44": {
+    "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45": {
       "crateName": "quote",
-      "version": "1.0.44",
+      "version": "1.0.45",
       "edition": "2021",
-      "sha256": "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4",
+      "sha256": "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924",
       "source": {
         "type": "crates-io"
       },
@@ -426,7 +433,7 @@
           "externCrateName": "proc_macro2"
         },
         {
-          "packageId": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.44",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45",
           "externCrateName": "quote"
         },
         {
@@ -522,7 +529,7 @@
           "externCrateName": "proc_macro2"
         },
         {
-          "packageId": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.44",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45",
           "externCrateName": "quote"
         },
         {

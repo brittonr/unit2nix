@@ -392,6 +392,25 @@ Lessons:
 - `flake-parts` input with `nixpkgs-lib.follows = "nixpkgs"` avoids duplicate nixpkgs eval
 - `nix flake show` reports `flakeModules` as `unknown` type — expected, not an error
 
+## Session: 2026-03-06 — Per-crate test support via --workspace
+Changes made:
+- **CLI**: Added `--workspace` flag to `cli.rs` — passes `--workspace` to both `cargo build --unit-graph` and `cargo test --unit-graph`
+- **Implied --include-dev**: When `--workspace` is set, automatically runs `cargo test --unit-graph` to capture dev-deps for ALL workspace members
+- **Validation**: `--workspace` + `--package` conflict checked in `run.rs` (cargo would reject it anyway)
+- **Fingerprint**: `workspace` flag included in `compute_inputs_hash` so plan regenerates when flag changes
+- **FFI**: `PluginInput` struct updated with `workspace: bool` field + implied `--include-dev` logic
+- **Auto mode**: `auto.nix` accepts `workspace ? false`, passes `--workspace` to unit2nix in IFD derivation
+- **Flake**: `buildFromUnitGraphAuto` wired through with `workspace` param
+- **Sample workspace**: Added `pretty_assertions` dev-dep to `sample-bin`, added test that uses it
+- **Regenerated**: `sample_workspace/build-plan.json` with `--workspace` — both `sample-lib` and `sample-bin` now have `devDependencies`
+- **README**: Updated CLI docs, testing section now recommends `--workspace` for workspaces
+- **Verification**: cargo test 59/59, cargo clippy 0 warnings, nix flake check 18/18
+
+Lessons:
+- The devshell's cargo wrapper (`~/.local/bin/cargo`) is a shell script that calls `nix develop --command cargo` — its shellHook pollutes stdout. Must use the raw Nix store cargo binary for unit2nix testing
+- `CARGO_TARGET_DIR` is set to `~/.cargo-target` in the devshell, so `./target/debug/unit2nix` is stale — must use `~/.cargo-target/debug/unit2nix`
+- `--workspace` in `append_common_args` goes before `--features` etc. since it's a global flag, but cargo doesn't care about order
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

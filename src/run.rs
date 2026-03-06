@@ -24,6 +24,11 @@ pub fn run(cli: &Cli) -> Result<()> {
         bail!("--members and --package cannot be used together");
     }
 
+    // Validate: --workspace and --package are mutually exclusive
+    if cli.workspace && cli.package.is_some() {
+        bail!("--workspace and --package cannot be used together");
+    }
+
     // Compute inputs fingerprint for incremental skipping.
     // Skip the check when writing to stdout (user wants the output regardless).
     let inputs_hash = if cli.stdout {
@@ -63,7 +68,11 @@ pub fn run(cli: &Cli) -> Result<()> {
     );
     eprintln!("  sha256: {cargo_lock_hash}");
 
-    let test_unit_graph = if cli.include_dev {
+    // --workspace implies --include-dev: the whole point of --workspace is
+    // per-crate test support, which requires dev-deps for all members.
+    let include_dev = cli.include_dev || cli.workspace;
+
+    let test_unit_graph = if include_dev {
         eprintln!("Running cargo test --unit-graph (for dev dependencies)...");
         let tug = cargo::run_test_unit_graph(cli)?;
         eprintln!("  {} units, {} roots", tug.units.len(), tug.roots.len());

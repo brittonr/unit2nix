@@ -42,7 +42,8 @@ pub fn compute_inputs_hash(cli: &Cli) -> Result<String> {
     hasher.update(
         format!(
             "features={:?}\nall_features={}\nno_default_features={}\n\
-             target={:?}\npackage={:?}\nbin={:?}\ninclude_dev={}\nmembers={:?}\n",
+             target={:?}\npackage={:?}\nbin={:?}\ninclude_dev={}\nmembers={:?}\n\
+             workspace={}\n",
             cli.features,
             cli.all_features,
             cli.no_default_features,
@@ -51,6 +52,7 @@ pub fn compute_inputs_hash(cli: &Cli) -> Result<String> {
             cli.bin,
             cli.include_dev,
             cli.members,
+            cli.workspace,
         )
         .as_bytes(),
     );
@@ -148,6 +150,7 @@ mod tests {
             no_check: false,
             json: false,
             force: false,
+            workspace: false,
         }
     }
 
@@ -198,6 +201,17 @@ mod tests {
         let h1 = compute_inputs_hash(&cli1).unwrap();
         let h2 = compute_inputs_hash(&cli2).unwrap();
         assert_ne!(h1, h2, "include_dev should change the hash");
+    }
+
+    #[test]
+    fn fingerprint_changes_with_workspace() {
+        let cli1 = make_cli();
+        let mut cli2 = make_cli();
+        cli2.workspace = true;
+
+        let h1 = compute_inputs_hash(&cli1).unwrap();
+        let h2 = compute_inputs_hash(&cli2).unwrap();
+        assert_ne!(h1, h2, "workspace should change the hash");
     }
 
     #[test]

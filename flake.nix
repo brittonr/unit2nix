@@ -72,6 +72,9 @@
               # `cargo --unit-graph` requires nightly. When set, this toolchain is
               # prepended to PATH, overriding the stable cargo bundled in the unit2nix wrapper.
               rustToolchain ? null,
+              # Pass --workspace to cargo for per-crate test support.
+              # When true, ALL workspace members and their dev-deps are resolved.
+              workspace ? false,
             }:
             import ./lib/auto.nix {
               inherit
@@ -84,6 +87,7 @@
                 clippyArgs
                 members
                 rustToolchain
+                workspace
                 ;
               unit2nix = self.packages.${system}.unit2nix;
             };

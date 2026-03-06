@@ -15,3 +15,15 @@ fn main() {
     // Test build script env var
     println!("build-script says: {}", sample_build_script::generated_value());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn greeting_integration() {
+        let g = Greeting::new("test");
+        assert_eq!(g.message, "Hello, test!");
+    }
+}

@@ -59,8 +59,11 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
     Ok(output.stdout)
 }
 
-/// Append common CLI flags (features, target, bin, package) to an args vector.
+/// Append common CLI flags (features, target, bin, package, workspace) to an args vector.
 fn append_common_args<'a>(args: &mut Vec<&'a str>, cli: &'a Cli) {
+    if cli.workspace {
+        args.push("--workspace");
+    }
     if let Some(features) = cli.features.as_deref() {
         args.extend_from_slice(&["--features", features]);
     }

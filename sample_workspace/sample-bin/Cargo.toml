@@ -7,3 +7,6 @@ edition = "2021"
 sample-lib = { path = "../sample-lib", features = ["serde"] }
 sample-macro = { path = "../sample-macro" }
 sample-build-script = { path = "../sample-build-script" }
+
+[dev-dependencies]
+pretty_assertions = "1"

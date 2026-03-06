@@ -89,6 +89,15 @@ pub struct Cli {
     /// last run. Use this flag to bypass the check.
     #[arg(long)]
     pub force: bool,
+
+    /// Resolve all workspace members (pass `--workspace` to cargo).
+    ///
+    /// Without this flag, cargo only resolves the default workspace members.
+    /// With `--workspace`, ALL members are included in the unit graph, and
+    /// `--include-dev` is implied so that every member's dev-dependencies
+    /// are captured for per-crate test support.
+    #[arg(long)]
+    pub workspace: bool,
 }
 
 impl Cli {

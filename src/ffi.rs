@@ -49,6 +49,9 @@ struct PluginInput {
     /// Build only specific workspace members (comma-separated)
     #[serde(default)]
     members: Option<String>,
+    /// Resolve all workspace members (passes --workspace to cargo)
+    #[serde(default)]
+    workspace: bool,
 }
 
 /// Resolve a Cargo workspace via unit-graph and return a [`NixBuildPlan`].
@@ -74,6 +77,8 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
         members: input.members.clone(),
         no_check: true,
         json: false,
+        force: false,
+        workspace: input.workspace,
     };
 
     let members_filter = cli.members_filter();
@@ -88,7 +93,10 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
     let (lock, cargo_lock_hash) = cargo::read_cargo_lock(&cli.manifest_path)
         .map_err(|e| format!("failed to read Cargo.lock: {e}"))?;
 
-    let test_unit_graph = if cli.include_dev {
+    // --workspace implies --include-dev
+    let include_dev = cli.include_dev || cli.workspace;
+
+    let test_unit_graph = if include_dev {
         Some(
             cargo::run_test_unit_graph(&cli)
                 .map_err(|e| format!("cargo test --unit-graph failed: {e}"))?,

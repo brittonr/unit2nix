@@ -115,7 +115,7 @@ Both `buildFromUnitGraph` and `buildFromUnitGraphAuto` return:
 | `workspaceMembers.<name>.build` | Built workspace member |
 | `rootCrate.build` | Root package (single-package projects) |
 | `allWorkspaceMembers` | `symlinkJoin` of all members |
-| `test.check.<name>` | `#[test]` runner (requires `--include-dev`) |
+| `test.check.<name>` | `#[test]` runner (requires `--include-dev` or `--workspace`) |
 | `clippy.allWorkspaceMembers` | Clippy all members |
 | `builtCrates.crates.<pkgId>` | Every crate derivation by package ID |
 
@@ -156,6 +156,15 @@ buildFromUnitGraph {
 
 ## Testing
 
+For workspaces, use `--workspace` to capture dev-dependencies for **all** members:
+
+```bash
+cargo unit2nix --workspace
+nix build .#test.check.my-crate
+```
+
+For single-crate projects, `--include-dev` is sufficient:
+
 ```bash
 cargo unit2nix --include-dev
 nix build .#test.check.my-crate
@@ -185,6 +194,7 @@ unit2nix [OPTIONS]
   --members <NAMES>         Workspace members to include (comma-separated)
   --target <TRIPLE>         Cross-compilation target
   --include-dev             Include dev-dependencies (for nix test support)
+  --workspace               Resolve all workspace members + dev-deps (implies --include-dev)
   -o, --output <FILE>       Output file [default: build-plan.json]
   --stdout                  Write to stdout
   --force                   Regenerate even if inputs haven't changed
