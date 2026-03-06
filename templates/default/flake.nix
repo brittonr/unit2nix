@@ -21,11 +21,10 @@
 
         # Build the workspace from the pre-resolved build plan.
         #
-        # Generate/update build-plan.json with:
-        #   nix run .#update-plan
+        # Generate/update build-plan.json:
+        #   unit2nix
         #
         # Regenerate whenever Cargo.lock changes (unit2nix will warn if stale).
-        # You can also use: cargo unit2nix -o build-plan.json (after cargo install cargo-unit2nix)
         ws = unit2nix.lib.${system}.buildFromUnitGraph {
           inherit pkgs;
           src = ./.;
@@ -64,18 +63,6 @@
         #   resolvedJson = ./build-plan.json;
         #   members = [ "my-bin" "my-lib" ];
         # };
-
-        # Regenerate build-plan.json when Cargo.lock changes.
-        # After generation, unit2nix automatically prints an override coverage
-        # summary showing which -sys crates need native library overrides.
-        apps.update-plan = {
-          type = "app";
-          program = toString (pkgs.writeShellScript "update-plan" ''
-            exec ${unit2nix.packages.${system}.unit2nix}/bin/unit2nix \
-              --manifest-path ./Cargo.toml \
-              -o build-plan.json
-          '');
-        };
 
         # Uncomment to add an override coverage check to `nix flake check`:
         # checks.overrides = pkgs.runCommand "check-overrides" {

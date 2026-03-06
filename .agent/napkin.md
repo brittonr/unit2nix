@@ -322,6 +322,25 @@ Lessons:
 - Nix functions can take attrsets as "optional parameters" via `{ includeDevDeps ? false }:` — cleaner than boolean positional args
 - `const fn` in Rust can use `matches!()` macro and `||` in const context
 
+## Session: 2026-03-05 #3 — Dead code & antipattern cleanup
+Changes made:
+- **Dead code (#1)**: Removed unused `UNIT2NIX_RUSTC_PATH` env var from `nix/plugin.nix` — was set at build time but never read by Rust FFI code
+- **Dead code (#2)**: Simplified `overrides.rs` — `KnownCrate` struct with always-true `covered` field → plain `&'static str` type alias; removed dead `else` branch in `check_overrides()`; `known_crates()` now uses `BTreeMap::from()` initializer
+- **Dead code (#3)**: Cleaned up `vendor.nix` `parseGitSource` — removed generic query param parsing (renaming `ref` → `branch`, collecting arbitrary params) that was never consumed; now extracts only `rev` (the only field accessed)
+- **Dead code (#4)**: Feature-gated `ffi` module — added `[features] ffi = []` to `Cargo.toml`, `#[cfg(feature = "ffi")]` on `pub mod ffi` in `lib.rs`, `--features ffi` in `nix/plugin.nix` build; CLI binary no longer carries `#[no_mangle]` FFI symbols
+- **Dead code (#5)**: Removed dead `rustdoc`/`rustfmt` symlinks from `clippyRustcWrapper` in `build-from-unit-graph.nix` — `buildRustCrate` only invokes `rustc`
+- **Antipattern (#6)**: Cargo.lock read once instead of twice — `read_cargo_lock()` now returns `(CargoLock, String)` (parsed lock + SHA256 hash); removed separate `hash_cargo_lock()` function; added `cargo_lock_parses_and_hashes_together` test
+- **Antipattern (#8)**: Introduced `MergeContext` struct — groups `unit_graph`, `unit_pkg_ids`, `checksums`, `workspace_root`; reduces `build_nix_crate` from 8 args to 5; added `make_ctx()` test helper
+- **Antipattern (#9)**: `resolve_source` refactored from `if let Some(m) = ... else ...` to `meta_pkg.map_or_else(...)` — removed `#[allow(clippy::option_if_let_else)]` suppression
+- **Minor (#12)**: Removed redundant `knownNoOverride` raw attrset export from `flake.nix` lib — `isKnownNoOverride` function already encapsulates the logic
+- **Minor (#13)**: Added `Default` derive to `NixCrate`; test helpers `make_nix_crate()` (merge.rs) and `make_plan()` (overrides.rs) now use struct update syntax (`..NixCrate::default()`); eliminated ~200 lines of test boilerplate
+- **Verification**: cargo test 47/47 (new: `cargo_lock_parses_and_hashes_together`), cargo clippy 0 warnings, `nix build` + `nix build .#sample` pass
+
+Lessons:
+- `BTreeMap::from([...])` is cleaner than `let mut m = BTreeMap::new(); for ... { m.insert(...) }` when the data is static
+- Feature-gating a module with `#[cfg(feature = "ffi")]` cleanly separates plugin-only code from CLI code without affecting the rlib
+- `Default` derive on output types enables struct update syntax in tests — dramatic boilerplate reduction with no runtime cost
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

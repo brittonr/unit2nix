@@ -39,9 +39,13 @@ pub struct Cli {
     #[arg(long)]
     pub target: Option<String>,
 
-    /// Output file (default: stdout)
-    #[arg(short, long)]
-    pub output: Option<PathBuf>,
+    /// Output file
+    #[arg(short, long, default_value = "build-plan.json")]
+    pub output: PathBuf,
+
+    /// Write to stdout instead of a file
+    #[arg(long)]
+    pub stdout: bool,
 
     /// Check which -sys crates need native overrides, then exit.
     /// Reads an existing build plan JSON (from -o) and reports coverage.

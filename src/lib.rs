@@ -12,4 +12,6 @@ pub mod prefetch;
 pub mod run;
 pub mod source;
 pub mod unit_graph;
+
+#[cfg(feature = "ffi")]
 pub mod ffi;

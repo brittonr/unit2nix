@@ -28,7 +28,7 @@ pub struct NixBuildPlan {
 }
 
 /// A single crate in the build plan, with everything needed to build it.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NixCrate {
     pub crate_name: String,

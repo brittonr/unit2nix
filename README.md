@@ -53,18 +53,18 @@ cargo install cargo-unit2nix
 nix flake init -t github:brittonr/unit2nix
 ```
 
-This creates a `flake.nix` pre-wired with unit2nix, including a `nix run .#update-plan` app. Edit it to set your crate name.
+This creates a `flake.nix` pre-wired with unit2nix. Edit it to set your crate name.
 
 ### 2. Generate a build plan
 
 ```bash
-nix run .#update-plan
+unit2nix
 ```
 
-Or equivalently:
+This writes `build-plan.json` (the default). Or via the cargo subcommand:
 
 ```bash
-cargo unit2nix -o build-plan.json
+cargo unit2nix
 ```
 
 ### 3. Build
@@ -155,7 +155,8 @@ Options:
   --all-features            Enable all features
   --no-default-features     Disable default features
   --target <TRIPLE>         Target triple (e.g. aarch64-unknown-linux-gnu)
-  -o, --output <FILE>       Output file [default: stdout]
+  -o, --output <FILE>       Output file [default: build-plan.json]
+  --stdout                 Write to stdout instead of a file
   --members <NAMES>         Build only specific workspace members (comma-separated)
   --include-dev             Include dev-dependencies for test support
   --check-overrides         Check -sys crate override coverage (reads existing plan)
@@ -205,8 +206,8 @@ This follows the same convention as crate2nix, so existing `crate-hashes.json` f
 Regenerate whenever `Cargo.toml` or `Cargo.lock` changes:
 
 ```bash
-nix run .#update-plan          # Nix users (zero install)
-cargo unit2nix -o build-plan.json   # cargo users
+unit2nix                       # writes build-plan.json
+cargo unit2nix                 # via cargo subcommand
 ```
 
 After generating, unit2nix automatically prints an override coverage summary showing which `-sys` crates are covered, which need attention, and exact override snippets. Use `--no-check` to suppress this in scripts.

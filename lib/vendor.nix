@@ -93,20 +93,19 @@ let
         else null;
       splitQuestion = lib.splitString "?" preFragment;
       url = builtins.elemAt splitQuestion 0;
-      queryParamsList = lib.optionals
-        (builtins.length splitQuestion >= 2)
-        (lib.splitString "&" (builtins.elemAt splitQuestion 1));
-      kv = s:
-        let parts = lib.splitString "=" s;
-        in {
-          name =
-            let key = builtins.elemAt parts 0;
-            in if key == "ref" then "branch" else key;
-          value = builtins.elemAt parts 1;
-        };
-      queryParams = builtins.listToAttrs (map kv queryParamsList);
+      # Extract only the ?rev= query param (the only one we consume).
+      queryString =
+        if builtins.length splitQuestion >= 2
+        then builtins.elemAt splitQuestion 1
+        else "";
+      queryParts = lib.splitString "&" queryString;
+      revParam = builtins.filter (s: lib.hasPrefix "rev=" s) queryParts;
+      rev =
+        if revParam != []
+        then lib.removePrefix "rev=" (builtins.head revParam)
+        else null;
     in
-    queryParams // { inherit url fragment; };
+    { inherit url fragment rev; };
 
   # Hash key format matching crate2nix convention
   toHashKey = pkg:

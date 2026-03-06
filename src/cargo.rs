@@ -131,52 +131,42 @@ pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
     serde_json::from_slice(&stdout).context("failed to parse cargo metadata JSON")
 }
 
-/// Read and parse the Cargo.lock file.
+/// Read and parse the Cargo.lock file, returning both the parsed lock
+/// and its SHA256 hash.
+///
+/// Reads the file once to avoid redundant I/O.  The Nix consumer compares
+/// the hash against `builtins.hashFile "sha256"` of the workspace's
+/// `Cargo.lock` to detect stale build plans.
 ///
 /// # Errors
-/// Returns an error if `Cargo.lock` is missing or not valid TOML.
-pub fn read_cargo_lock(manifest_path: &Path) -> Result<CargoLock> {
+/// Returns an error if `Cargo.lock` is missing, unreadable, or not valid TOML.
+pub fn read_cargo_lock(manifest_path: &Path) -> Result<(CargoLock, String)> {
     let lock_path = cargo_lock_path(manifest_path);
-    let content = std::fs::read_to_string(&lock_path)
+    let content = std::fs::read(&lock_path)
         .with_context(|| {
             format!(
                 "failed to read {}. Run `cargo generate-lockfile` or `cargo update` first",
                 lock_path.display()
             )
         })?;
-    toml::from_str(&content).context("failed to parse Cargo.lock")
-}
-
-/// Compute SHA256 hash of the Cargo.lock file content.
-///
-/// Returns a hex-encoded hash string. The Nix consumer compares this
-/// against `builtins.hashFile "sha256"` of the workspace's Cargo.lock
-/// to detect stale build plans.
-///
-/// # Errors
-/// Returns an error if `Cargo.lock` cannot be read.
-pub fn hash_cargo_lock(manifest_path: &Path) -> Result<String> {
-    let lock_path = cargo_lock_path(manifest_path);
-    let content = std::fs::read(&lock_path)
-        .with_context(|| {
-            format!(
-                "failed to read {} for hashing. Run `cargo generate-lockfile` or `cargo update` first",
-                lock_path.display()
-            )
-        })?;
     let hash = Sha256::digest(&content);
-    Ok(format!("{hash:x}"))
+    let text = String::from_utf8(content)
+        .context("Cargo.lock is not valid UTF-8")?;
+    let lock: CargoLock = toml::from_str(&text)
+        .context("failed to parse Cargo.lock")?;
+    Ok((lock, format!("{hash:x}")))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::hash_cargo_lock;
+    use super::read_cargo_lock;
     use std::path::Path;
 
     #[test]
     fn cargo_lock_hash_is_sha256_hex() {
         // Hash our own Cargo.lock as a smoke test
-        let hash = hash_cargo_lock(Path::new("./Cargo.toml")).expect("should hash Cargo.lock");
+        let (_lock, hash) = read_cargo_lock(Path::new("./Cargo.toml"))
+            .expect("should read Cargo.lock");
         assert_eq!(hash.len(), 64, "SHA256 hex should be 64 chars, got: {hash}");
         assert!(
             hash.chars().all(|c| c.is_ascii_hexdigit()),
@@ -186,8 +176,19 @@ mod tests {
 
     #[test]
     fn cargo_lock_hash_is_deterministic() {
-        let h1 = hash_cargo_lock(Path::new("./Cargo.toml")).unwrap();
-        let h2 = hash_cargo_lock(Path::new("./Cargo.toml")).unwrap();
+        let (_, h1) = read_cargo_lock(Path::new("./Cargo.toml")).unwrap();
+        let (_, h2) = read_cargo_lock(Path::new("./Cargo.toml")).unwrap();
         assert_eq!(h1, h2, "same file should produce same hash");
+    }
+
+    #[test]
+    fn cargo_lock_parses_and_hashes_together() {
+        let (lock, hash) = read_cargo_lock(Path::new("./Cargo.toml")).unwrap();
+        assert!(!hash.is_empty(), "hash should not be empty");
+        // Our own Cargo.lock should have packages
+        assert!(
+            lock.package.is_some(),
+            "Cargo.lock should have a [[package]] section"
+        );
     }
 }

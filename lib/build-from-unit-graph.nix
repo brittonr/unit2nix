@@ -69,11 +69,11 @@ let
         The Cargo.lock has changed since build-plan.json was generated.
         Regenerate it with:
 
-          nix run .#update-plan
+          unit2nix
 
-        Or if you have cargo-unit2nix installed:
+        Or equivalently:
 
-          cargo unit2nix -o build-plan.json
+          cargo unit2nix
 
         Set skipStalenessCheck = true to bypass this check.
 
@@ -371,13 +371,6 @@ let
         # Wrap clippy-driver as "rustc" so buildRustCrate runs clippy
         makeWrapper ${clippy}/bin/clippy-driver $out/bin/rustc \
           ${lib.optionalString (clippyArgs != []) ''--add-flags "${extraArgs}"''}
-
-        # Forward other tools from the real toolchain
-        for tool in rustdoc rustfmt; do
-          if [ -e ${rustc}/bin/$tool ]; then
-            ln -s ${rustc}/bin/$tool $out/bin/$tool
-          fi
-        done
       '';
 
   # Build workspace members under clippy, reusing normal dependency builds.

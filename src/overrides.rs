@@ -10,14 +10,10 @@ use serde::Serialize;
 
 use crate::output::NixBuildPlan;
 
-/// A known crate entry: what it needs and whether it's covered.
-#[derive(Debug)]
-pub struct KnownCrate {
-    /// Human-readable note about what the crate needs.
-    pub note: &'static str,
-    /// Whether it's covered by nixpkgs defaultCrateOverrides or unit2nix built-ins.
-    pub covered: bool,
-}
+/// A known crate entry: human-readable note about what native libraries it needs.
+/// All crates in this registry are covered by nixpkgs `defaultCrateOverrides`
+/// or unit2nix's built-in overrides (`lib/crate-overrides.nix`).
+type KnownCrate = &'static str;
 
 /// Override status for a single crate in the report.
 #[derive(Debug, Serialize)]
@@ -60,11 +56,12 @@ fn is_known_no_override(crate_name: &str, links_value: &str) -> bool {
 }
 
 /// Build the known-crate registry.
+///
+/// Every entry here is covered by either nixpkgs `defaultCrateOverrides`
+/// or unit2nix's built-in overrides (`lib/crate-overrides.nix`).
 fn known_crates() -> BTreeMap<&'static str, KnownCrate> {
-    let mut m = BTreeMap::new();
-
-    // Covered by nixpkgs defaultCrateOverrides
-    let nixpkgs = [
+    BTreeMap::from([
+        // Covered by nixpkgs defaultCrateOverrides
         ("openssl-sys", "needs pkg-config + openssl.dev"),
         ("libgit2-sys", "needs pkg-config + libgit2"),
         ("libz-sys", "needs pkg-config + zlib"),
@@ -80,13 +77,7 @@ fn known_crates() -> BTreeMap<&'static str, KnownCrate> {
         ("expat-sys", "needs pkg-config + expat"),
         ("libudev-sys", "needs pkg-config + udev"),
         ("aws-lc-sys", "needs cmake + go"),
-    ];
-    for (name, note) in nixpkgs {
-        m.insert(name, KnownCrate { note, covered: true });
-    }
-
-    // Covered by unit2nix built-in overrides (lib/crate-overrides.nix)
-    let unit2nix = [
+        // Covered by unit2nix built-in overrides (lib/crate-overrides.nix)
         ("ring", "needs perl for build script assembly compilation"),
         ("tikv-jemalloc-sys", "needs make for vendored jemalloc build"),
         ("jemalloc-sys", "needs make for vendored jemalloc build"),
@@ -95,12 +86,7 @@ fn known_crates() -> BTreeMap<&'static str, KnownCrate> {
         ("zstd-sys", "needs pkg-config + zstd"),
         ("bzip2-sys", "needs pkg-config + bzip2"),
         ("lzma-sys", "needs pkg-config + xz/lzma"),
-    ];
-    for (name, note) in unit2nix {
-        m.insert(name, KnownCrate { note, covered: true });
-    }
-
-    m
+    ])
 }
 
 /// Analyze override coverage for a build plan and return a structured report.
@@ -131,24 +117,14 @@ pub fn check_overrides(plan: &NixBuildPlan) -> OverrideReport {
                 status: "no-override-needed",
                 note: Some("Rust-internal".to_string()),
             });
-        } else if let Some(known) = registry.get(crate_name) {
-            if known.covered {
-                covered_count += 1;
-                crate_statuses.push(CrateOverrideStatus {
-                    name: (*crate_name).to_string(),
-                    links: (*links_value).to_string(),
-                    status: "covered",
-                    note: Some(known.note.to_string()),
-                });
-            } else {
-                missing_count += 1;
-                crate_statuses.push(CrateOverrideStatus {
-                    name: (*crate_name).to_string(),
-                    links: (*links_value).to_string(),
-                    status: "unknown",
-                    note: Some(known.note.to_string()),
-                });
-            }
+        } else if let Some(note) = registry.get(crate_name) {
+            covered_count += 1;
+            crate_statuses.push(CrateOverrideStatus {
+                name: (*crate_name).to_string(),
+                links: (*links_value).to_string(),
+                status: "covered",
+                note: Some((*note).to_string()),
+            });
         } else {
             missing_count += 1;
             crate_statuses.push(CrateOverrideStatus {
@@ -250,25 +226,8 @@ mod tests {
                 NixCrate {
                     crate_name: name.to_string(),
                     version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    sha256: None,
-                    source: None,
-                    features: vec![],
-                    dependencies: vec![],
-                    build_dependencies: vec![],
-                    dev_dependencies: vec![],
-                    proc_macro: false,
-                    build: None,
-                    lib_path: None,
-                    lib_name: None,
-                    lib_crate_types: vec![],
-                    crate_bin: vec![],
                     links: links.map(str::to_owned),
-                    authors: vec![],
-                    description: None,
-                    homepage: None,
-                    license: None,
-                    repository: None,
+                    ..NixCrate::default()
                 },
             );
         }

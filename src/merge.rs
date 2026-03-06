@@ -59,24 +59,22 @@ fn sanitize_metadata(s: &str) -> String {
 }
 
 /// Resolve source info for a crate, preferring metadata over `pkg_id` inference.
-#[allow(clippy::option_if_let_else)]
 fn resolve_source(
     pkg_id: &str,
     crate_name: &str,
     meta_pkg: Option<&MetadataPackage>,
     workspace_root: &str,
 ) -> Option<NixSource> {
-    let source = if let Some(m) = meta_pkg {
-        match parse_source(m.source.as_deref(), &m.manifest_path, workspace_root) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("warning: {e:#} for {crate_name}, falling back to pkg_id inference");
-                infer_source_from_pkg_id(pkg_id)
-            }
-        }
-    } else {
-        infer_source_from_pkg_id(pkg_id)
-    };
+    let source = meta_pkg.map_or_else(
+        || infer_source_from_pkg_id(pkg_id),
+        |m| {
+            parse_source(m.source.as_deref(), &m.manifest_path, workspace_root)
+                .unwrap_or_else(|e| {
+                    eprintln!("warning: {e:#} for {crate_name}, falling back to pkg_id inference");
+                    infer_source_from_pkg_id(pkg_id)
+                })
+        },
+    );
 
     if source.is_none() && !pkg_id.starts_with("path+") {
         eprintln!(
@@ -87,19 +85,26 @@ fn resolve_source(
     source
 }
 
+/// Shared context for building `NixCrate` values from a unit graph.
+///
+/// Groups the immutable parameters that `build_nix_crate` needs, reducing
+/// the argument count from 8 to 4.
+struct MergeContext<'a> {
+    unit_graph: &'a UnitGraph,
+    unit_pkg_ids: Vec<&'a str>,
+    checksums: BTreeMap<(&'a str, &'a str), &'a str>,
+    workspace_root: &'a str,
+}
+
 /// Build a `NixCrate` from a set of unit graph units for a package.
 ///
 /// Returns `Ok(Some(crate))` on success, `Ok(None)` if the package has no
 /// buildable target (should be skipped), or `Err` on parse failures.
-#[allow(clippy::too_many_arguments)]
 fn build_nix_crate(
+    ctx: &MergeContext<'_>,
     pkg_id: &str,
     units: &[(usize, &Unit)],
-    unit_graph: &UnitGraph,
-    unit_pkg_ids: &[&str],
     meta_pkg: Option<&MetadataPackage>,
-    checksums: &BTreeMap<(&str, &str), &str>,
-    workspace_root: &str,
     include_bins: bool,
 ) -> Result<Option<NixCrate>> {
     // Find the primary lib unit (prefer lib over proc-macro)
@@ -131,14 +136,14 @@ fn build_nix_crate(
 
     let features = collect_features(units);
     let proc_macro = primary.target.has_proc_macro();
-    let dependencies = collect_dependencies(units, unit_graph, unit_pkg_ids, pkg_id);
-    let build_dependencies = collect_build_dependencies(build_script_unit, unit_pkg_ids);
+    let dependencies = collect_dependencies(units, ctx.unit_graph, &ctx.unit_pkg_ids, pkg_id);
+    let build_dependencies = collect_build_dependencies(build_script_unit, &ctx.unit_pkg_ids);
 
-    let sha256 = checksums
+    let sha256 = ctx.checksums
         .get(&(crate_name.as_str(), version.as_str()))
         .map(std::string::ToString::to_string);
 
-    let source = resolve_source(pkg_id, &crate_name, meta_pkg, workspace_root);
+    let source = resolve_source(pkg_id, &crate_name, meta_pkg, ctx.workspace_root);
 
     // Crate root directory (from manifest_path, strip Cargo.toml)
     let crate_root = meta_pkg
@@ -256,23 +261,24 @@ pub fn merge(
         .map(|p| (p.id.as_str(), p))
         .collect();
 
-    // Index Cargo.lock checksums by (name, version)
-    let checksums: BTreeMap<(&str, &str), &str> = lock
-        .package
-        .as_ref()
-        .map(|pkgs| {
-            pkgs.iter()
-                .filter_map(|p| {
-                    p.checksum
-                        .as_deref()
-                        .map(|cksum| ((p.name.as_str(), p.version.as_str()), cksum))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Map unit index → pkg_id for dependency resolution
-    let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+    let ctx = MergeContext {
+        unit_graph,
+        unit_pkg_ids: unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect(),
+        checksums: lock
+            .package
+            .as_ref()
+            .map(|pkgs| {
+                pkgs.iter()
+                    .filter_map(|p| {
+                        p.checksum
+                            .as_deref()
+                            .map(|cksum| ((p.name.as_str(), p.version.as_str()), cksum))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        workspace_root: &metadata.workspace_root,
+    };
 
     // Group units by pkg_id
     let mut pkg_units: BTreeMap<&str, Vec<(usize, &Unit)>> = BTreeMap::new();
@@ -290,13 +296,10 @@ pub fn merge(
         let is_workspace_member = metadata.workspace_members.iter().any(|wm| wm == pkg_id);
 
         let Some(nix_crate) = build_nix_crate(
+            &ctx,
             pkg_id,
             units,
-            unit_graph,
-            &unit_pkg_ids,
             meta_pkg,
-            &checksums,
-            &metadata.workspace_root,
             is_workspace_member,
         )?
         else {
@@ -314,7 +317,7 @@ pub fn merge(
             unit_graph,
             metadata,
             &meta_by_id,
-            &checksums,
+            &ctx.checksums,
             &mut crates,
         )?;
     }
@@ -609,6 +612,14 @@ fn compute_dev_dependencies(
     }
 
     // Add dev-only crates to the build plan (they're needed as dependencies)
+    // Build a context for the test graph so build_nix_crate can resolve deps
+    let test_ctx = MergeContext {
+        unit_graph: test_graph,
+        unit_pkg_ids: test_pkg_ids.clone(),
+        checksums: checksums.clone(),
+        workspace_root: &metadata.workspace_root,
+    };
+
     for dev_pkg_id in &dev_only_pkg_ids {
         let meta_pkg = meta_by_id.get(dev_pkg_id.as_str()).copied();
         let units = test_pkg_units
@@ -617,13 +628,10 @@ fn compute_dev_dependencies(
             .unwrap_or_default();
 
         let Some(nix_crate) = build_nix_crate(
+            &test_ctx,
             dev_pkg_id,
             &units,
-            test_graph,
-            &test_pkg_ids,
             meta_pkg,
-            checksums,
-            &metadata.workspace_root,
             false, // dev-only crates never include bin targets
         )?
         else {
@@ -706,6 +714,16 @@ mod tests {
     // ---------------------------------------------------------------------------
     // Test fixtures / helpers
     // ---------------------------------------------------------------------------
+
+    /// Create a minimal `NixCrate` for tests. Override fields after construction.
+    fn make_nix_crate(name: &str, version: &str) -> NixCrate {
+        NixCrate {
+            crate_name: name.to_string(),
+            version: version.to_string(),
+            edition: "2021".to_string(),
+            ..NixCrate::default()
+        }
+    }
 
     fn make_unit(
         pkg_id: &str,
@@ -1014,61 +1032,13 @@ mod tests {
     #[test]
     fn validate_references_passes_when_all_valid() {
         let mut crates = BTreeMap::new();
-        crates.insert(
-            "pkg_a#0.1.0".to_string(),
-            NixCrate {
-                crate_name: "pkg_a".to_string(),
-                version: "0.1.0".to_string(),
-                edition: "2021".to_string(),
-                sha256: None,
-                source: None,
-                features: vec![],
-                dependencies: vec![NixDep {
-                    package_id: "pkg_b#0.2.0".to_string(),
-                    extern_crate_name: "pkg_b".to_string(),
-                }],
-                build_dependencies: vec![],
-                dev_dependencies: vec![],
-                proc_macro: false,
-                build: None,
-                lib_path: None,
-                lib_name: None,
-                lib_crate_types: vec![],
-                crate_bin: vec![],
-                links: None,
-                authors: vec![],
-                description: None,
-                homepage: None,
-                license: None,
-                repository: None,
-            },
-        );
-        crates.insert(
-            "pkg_b#0.2.0".to_string(),
-            NixCrate {
-                crate_name: "pkg_b".to_string(),
-                version: "0.2.0".to_string(),
-                edition: "2021".to_string(),
-                sha256: None,
-                source: None,
-                features: vec![],
-                dependencies: vec![],
-                build_dependencies: vec![],
-                dev_dependencies: vec![],
-                proc_macro: false,
-                build: None,
-                lib_path: None,
-                lib_name: None,
-                lib_crate_types: vec![],
-                crate_bin: vec![],
-                links: None,
-                authors: vec![],
-                description: None,
-                homepage: None,
-                license: None,
-                repository: None,
-            },
-        );
+        let mut pkg_a = make_nix_crate("pkg_a", "0.1.0");
+        pkg_a.dependencies = vec![NixDep {
+            package_id: "pkg_b#0.2.0".to_string(),
+            extern_crate_name: "pkg_b".to_string(),
+        }];
+        crates.insert("pkg_a#0.1.0".to_string(), pkg_a);
+        crates.insert("pkg_b#0.2.0".to_string(), make_nix_crate("pkg_b", "0.2.0"));
 
         let result = validate_references(&crates);
         assert!(result.is_ok());
@@ -1077,35 +1047,12 @@ mod tests {
     #[test]
     fn validate_references_fails_with_dangling_refs() {
         let mut crates = BTreeMap::new();
-        crates.insert(
-            "pkg_a#0.1.0".to_string(),
-            NixCrate {
-                crate_name: "pkg_a".to_string(),
-                version: "0.1.0".to_string(),
-                edition: "2021".to_string(),
-                sha256: None,
-                source: None,
-                features: vec![],
-                dependencies: vec![NixDep {
-                    package_id: "missing#0.9.0".to_string(),
-                    extern_crate_name: "missing".to_string(),
-                }],
-                build_dependencies: vec![],
-                dev_dependencies: vec![],
-                proc_macro: false,
-                build: None,
-                lib_path: None,
-                lib_name: None,
-                lib_crate_types: vec![],
-                crate_bin: vec![],
-                links: None,
-                authors: vec![],
-                description: None,
-                homepage: None,
-                license: None,
-                repository: None,
-            },
-        );
+        let mut pkg_a = make_nix_crate("pkg_a", "0.1.0");
+        pkg_a.dependencies = vec![NixDep {
+            package_id: "missing#0.9.0".to_string(),
+            extern_crate_name: "missing".to_string(),
+        }];
+        crates.insert("pkg_a#0.1.0".to_string(), pkg_a);
 
         let result = validate_references(&crates);
         assert!(result.is_err());
@@ -1114,6 +1061,16 @@ mod tests {
     // ---------------------------------------------------------------------------
     // build_nix_crate tests
     // ---------------------------------------------------------------------------
+
+    /// Build a `MergeContext` from a `UnitGraph` for tests.
+    fn make_ctx(unit_graph: &UnitGraph) -> MergeContext<'_> {
+        MergeContext {
+            unit_graph,
+            unit_pkg_ids: unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect(),
+            checksums: BTreeMap::new(),
+            workspace_root: "/workspace",
+        }
+    }
 
     #[test]
     fn build_nix_crate_lib_crate() {
@@ -1128,7 +1085,8 @@ mod tests {
             )],
             roots: vec![0],
         };
-        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let mut ctx = make_ctx(&unit_graph);
+        ctx.checksums.insert(("serde", "1.0.0"), "abc123");
         let units = vec![(0, &unit_graph.units[0])];
 
         let meta_pkg = make_meta_pkg(
@@ -1136,17 +1094,12 @@ mod tests {
             Some("registry+https://github.com/rust-lang/crates.io-index"),
             "/path/to/Cargo.toml",
         );
-        let mut checksums = BTreeMap::new();
-        checksums.insert(("serde", "1.0.0"), "abc123");
 
         let result = build_nix_crate(
+            &ctx,
             pkg_id,
             &units,
-            &unit_graph,
-            &unit_pkg_ids,
             Some(&meta_pkg),
-            &checksums,
-            "/workspace",
             false,
         )
         .unwrap();
@@ -1171,19 +1124,16 @@ mod tests {
             units: vec![unit],
             roots: vec![0],
         };
-        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let ctx = make_ctx(&unit_graph);
         let units = vec![(0, &unit_graph.units[0])];
 
         let meta_pkg = make_meta_pkg(pkg_id, None, "/home/user/proj/Cargo.toml");
 
         let result = build_nix_crate(
+            &ctx,
             pkg_id,
             &units,
-            &unit_graph,
-            &unit_pkg_ids,
             Some(&meta_pkg),
-            &BTreeMap::new(),
-            "/workspace",
             true, // include_bins = true
         )
         .unwrap();
@@ -1208,17 +1158,14 @@ mod tests {
             )],
             roots: vec![0],
         };
-        let unit_pkg_ids: Vec<&str> = unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
+        let ctx = make_ctx(&unit_graph);
         let units = vec![(0, &unit_graph.units[0])];
 
         let result = build_nix_crate(
+            &ctx,
             pkg_id,
             &units,
-            &unit_graph,
-            &unit_pkg_ids,
             None,
-            &BTreeMap::new(),
-            "/workspace",
             false,
         )
         .unwrap();
@@ -1267,61 +1214,13 @@ mod tests {
         let mut crates = BTreeMap::new();
 
         // Pre-populate with ws_member and dep_a (from build graph)
-        crates.insert(
-            "ws_member#0.1.0".to_string(),
-            NixCrate {
-                crate_name: "ws_member".to_string(),
-                version: "0.1.0".to_string(),
-                edition: "2021".to_string(),
-                sha256: None,
-                source: None,
-                features: vec![],
-                dependencies: vec![NixDep {
-                    package_id: "dep_a#0.2.0".to_string(),
-                    extern_crate_name: "dep_a".to_string(),
-                }],
-                build_dependencies: vec![],
-                dev_dependencies: vec![],
-                proc_macro: false,
-                build: None,
-                lib_path: None,
-                lib_name: None,
-                lib_crate_types: vec![],
-                crate_bin: vec![],
-                links: None,
-                authors: vec![],
-                description: None,
-                homepage: None,
-                license: None,
-                repository: None,
-            },
-        );
-        crates.insert(
-            "dep_a#0.2.0".to_string(),
-            NixCrate {
-                crate_name: "dep_a".to_string(),
-                version: "0.2.0".to_string(),
-                edition: "2021".to_string(),
-                sha256: None,
-                source: None,
-                features: vec![],
-                dependencies: vec![],
-                build_dependencies: vec![],
-                dev_dependencies: vec![],
-                proc_macro: false,
-                build: None,
-                lib_path: None,
-                lib_name: None,
-                lib_crate_types: vec![],
-                crate_bin: vec![],
-                links: None,
-                authors: vec![],
-                description: None,
-                homepage: None,
-                license: None,
-                repository: None,
-            },
-        );
+        let mut ws_member = make_nix_crate("ws_member", "0.1.0");
+        ws_member.dependencies = vec![NixDep {
+            package_id: "dep_a#0.2.0".to_string(),
+            extern_crate_name: "dep_a".to_string(),
+        }];
+        crates.insert("ws_member#0.1.0".to_string(), ws_member);
+        crates.insert("dep_a#0.2.0".to_string(), make_nix_crate("dep_a", "0.2.0"));
 
         compute_dev_dependencies(
             &test_graph,
@@ -1374,32 +1273,7 @@ mod tests {
         let checksums = BTreeMap::new();
         let mut crates = BTreeMap::new();
 
-        crates.insert(
-            "ws_member#0.1.0".to_string(),
-            NixCrate {
-                crate_name: "ws_member".to_string(),
-                version: "0.1.0".to_string(),
-                edition: "2021".to_string(),
-                sha256: None,
-                source: None,
-                features: vec![],
-                dependencies: vec![],
-                build_dependencies: vec![],
-                dev_dependencies: vec![],
-                proc_macro: false,
-                build: None,
-                lib_path: None,
-                lib_name: None,
-                lib_crate_types: vec![],
-                crate_bin: vec![],
-                links: None,
-                authors: vec![],
-                description: None,
-                homepage: None,
-                license: None,
-                repository: None,
-            },
-        );
+        crates.insert("ws_member#0.1.0".to_string(), make_nix_crate("ws_member", "0.1.0"));
 
         compute_dev_dependencies(
             &test_graph,

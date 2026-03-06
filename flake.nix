@@ -142,7 +142,6 @@
           lib = {
             inherit buildFromUnitGraph buildFromUnitGraphAuto buildFromUnitGraphPlugin;
             crateOverrides = crateOverridesLib.overrides;
-            knownNoOverride = crateOverridesLib.knownNoOverride;
             isKnownNoOverride = crateOverridesLib.isKnownNoOverride;
           };
 
@@ -165,15 +164,6 @@
               ;
           };
 
-          apps.update-plan = {
-            type = "app";
-            program = toString (pkgs.writeShellScript "update-plan" ''
-              exec ${unit2nix}/bin/unit2nix \
-                --manifest-path ./Cargo.toml \
-                -o build-plan.json
-            '');
-          };
-
           devShells.default = import ./nix/devshell.nix { inherit pkgs; };
         }
       );
@@ -189,7 +179,6 @@
       lib = pick "lib";
       packages = pick "packages";
       checks = pick "checks";
-      apps = pick "apps";
       devShells = pick "devShells";
     };
 }

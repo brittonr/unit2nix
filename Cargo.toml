@@ -10,6 +10,10 @@ readme = "README.md"
 keywords = ["nix", "cargo", "build", "crate"]
 categories = ["development-tools::build-utils"]
 
+[features]
+default = []
+ffi = []
+
 [lib]
 name = "unit2nix"
 path = "src/lib.rs"

@@ -76,7 +76,7 @@ else if sourceType == "git" then
             + "using builtins.fetchGit (requires --impure).\n"
             + "  To fix, run:\n"
             + "    nix-prefetch-git --url ${source.url} --rev ${source.rev}\n"
-            + "  Then regenerate the build plan with `nix run .#update-plan`.")
+            + "  Then regenerate the build plan with `unit2nix`.")
           builtins.fetchGit {
             url = source.url;
             rev = source.rev;

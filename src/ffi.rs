@@ -67,7 +67,8 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
         all_features: input.all_features,
         no_default_features: input.no_default_features,
         target: input.target.clone(),
-        output: None,
+        output: PathBuf::from("build-plan.json"),
+        stdout: false,
         check_overrides: false,
         include_dev: input.include_dev,
         members: input.members.clone(),
@@ -84,11 +85,8 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
     let metadata = cargo::run_cargo_metadata(&cli)
         .map_err(|e| format!("cargo metadata failed: {e}"))?;
 
-    let lock = cargo::read_cargo_lock(&cli.manifest_path)
+    let (lock, cargo_lock_hash) = cargo::read_cargo_lock(&cli.manifest_path)
         .map_err(|e| format!("failed to read Cargo.lock: {e}"))?;
-
-    let cargo_lock_hash = cargo::hash_cargo_lock(&cli.manifest_path)
-        .map_err(|e| format!("failed to hash Cargo.lock: {e}"))?;
 
     let test_unit_graph = if cli.include_dev {
         Some(

@@ -30,7 +30,7 @@ pub fn prefetch_git(url: &str, rev: &str) -> Result<String> {
             bail!(
                 "nix-prefetch-git not found on PATH.\n\
                  Install it with `nix-env -iA nixpkgs.nix-prefetch-git`,\n\
-                 or use `nix run .#update-plan` which bundles it automatically."
+                 or install via `nix profile install github:NixOS/nixpkgs#nix-prefetch-git`."
             );
         }
         Err(e) => {

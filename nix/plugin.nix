@@ -30,14 +30,13 @@ let
     };
     cargoLock.lockFile = ../Cargo.lock;
     
-    # Bake in cargo + rustc paths so the plugin can shell out at eval time
+    # Bake in cargo path so the plugin can shell out at eval time
     UNIT2NIX_CARGO_PATH = lib.getExe cargo;
-    UNIT2NIX_RUSTC_PATH = lib.getExe rustc;
     
-    # Only build the static library, not the binaries
+    # Only build the static library with FFI symbols, not the binaries
     buildPhase = ''
       runHook preBuild
-      cargo build --release --lib
+      cargo build --release --lib --features ffi
       runHook postBuild
     '';
     

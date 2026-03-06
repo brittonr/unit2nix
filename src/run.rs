@@ -34,16 +34,13 @@ pub fn run(cli: &Cli) -> Result<()> {
     eprintln!("  {} packages", metadata.packages.len());
 
     eprintln!("Reading Cargo.lock...");
-    let lock = cargo::read_cargo_lock(&cli.manifest_path)?;
+    let (lock, cargo_lock_hash) = cargo::read_cargo_lock(&cli.manifest_path)?;
     eprintln!(
         "  {} packages with checksums",
         lock.package
             .as_ref()
             .map_or(0, |p| p.iter().filter(|p| p.checksum.is_some()).count())
     );
-
-    eprintln!("Hashing Cargo.lock...");
-    let cargo_lock_hash = cargo::hash_cargo_lock(&cli.manifest_path)?;
     eprintln!("  sha256: {cargo_lock_hash}");
 
     let test_unit_graph = if cli.include_dev {
@@ -76,13 +73,12 @@ pub fn run(cli: &Cli) -> Result<()> {
 
     let json = serde_json::to_string_pretty(&plan)?;
 
-    match &cli.output {
-        Some(path) => {
-            std::fs::write(path, &json)
-                .with_context(|| format!("failed to write output to {}", path.display()))?;
-            eprintln!("Wrote {}", path.display());
-        }
-        None => println!("{json}"),
+    if cli.stdout {
+        println!("{json}");
+    } else {
+        std::fs::write(&cli.output, &json)
+            .with_context(|| format!("failed to write output to {}", cli.output.display()))?;
+        eprintln!("Wrote {}", cli.output.display());
     }
 
     // Auto-check override coverage after generation (unless suppressed)
@@ -100,10 +96,7 @@ pub fn run(cli: &Cli) -> Result<()> {
 
 /// Read an existing build plan JSON and check override coverage.
 fn run_check_overrides(cli: &Cli) -> Result<()> {
-    let path = cli
-        .output
-        .as_ref()
-        .context("--check-overrides requires -o <build-plan.json> to specify which plan to check")?;
+    let path = &cli.output;
 
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read build plan from {}", path.display()))?;
