@@ -234,9 +234,11 @@ fn build_nix_crate(
 /// This is the core of unit2nix: it combines three cargo outputs into a single
 /// JSON structure that the Nix consumer can walk to build each crate.
 ///
-/// When `test_unit_graph` is provided (from `cargo test --unit-graph`), any
-/// packages and dependencies that appear in the test graph but not the build
-/// graph are emitted as `devDependencies` on the relevant workspace members.
+/// When `test_unit_graph` is provided (from `cargo test --unit-graph`), it is
+/// used as the primary source for all crates — its feature sets already reflect
+/// Cargo's feature unification across both normal and dev dependencies, so no
+/// post-hoc merging is needed. Dev-only dependencies are classified by
+/// comparing Build-mode vs Test-mode units within the test graph itself.
 ///
 /// # Errors
 /// Returns an error if package IDs are malformed, dependency references
@@ -261,28 +263,42 @@ pub fn merge(
         .map(|p| (p.id.as_str(), p))
         .collect();
 
+    let checksums: BTreeMap<(&str, &str), &str> = lock
+        .package
+        .as_ref()
+        .map(|pkgs| {
+            pkgs.iter()
+                .filter_map(|p| {
+                    p.checksum
+                        .as_deref()
+                        .map(|cksum| ((p.name.as_str(), p.version.as_str()), cksum))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Use the test graph as the primary source when available.
+    //
+    // The test graph is a superset of the build graph: it contains every crate
+    // from the build graph plus dev-only crates, and its feature sets reflect
+    // Cargo's feature unification across both normal and dev dependencies.
+    // Building from the superset gives each crate the correct (unified) feature
+    // set in a single pass — no post-hoc merging needed.
+    //
+    // The build graph is then used only to classify which dependencies are
+    // dev-only (present in test graph but absent from build graph).
+    let primary_graph = test_unit_graph.unwrap_or(unit_graph);
+
     let ctx = MergeContext {
-        unit_graph,
-        unit_pkg_ids: unit_graph.units.iter().map(|u| u.pkg_id.as_str()).collect(),
-        checksums: lock
-            .package
-            .as_ref()
-            .map(|pkgs| {
-                pkgs.iter()
-                    .filter_map(|p| {
-                        p.checksum
-                            .as_deref()
-                            .map(|cksum| ((p.name.as_str(), p.version.as_str()), cksum))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        unit_graph: primary_graph,
+        unit_pkg_ids: primary_graph.units.iter().map(|u| u.pkg_id.as_str()).collect(),
+        checksums,
         workspace_root: &metadata.workspace_root,
     };
 
     // Group units by pkg_id
     let mut pkg_units: BTreeMap<&str, Vec<(usize, &Unit)>> = BTreeMap::new();
-    for (idx, unit) in unit_graph.units.iter().enumerate() {
+    for (idx, unit) in primary_graph.units.iter().enumerate() {
         pkg_units
             .entry(unit.pkg_id.as_str())
             .or_default()
@@ -309,17 +325,12 @@ pub fn merge(
         crates.insert(pkg_id.to_string(), nix_crate);
     }
 
-    // Dev dependencies: compare test unit graph against build unit graph to find
-    // dev-only packages and dependencies for workspace members.
-    if let Some(test_graph) = test_unit_graph {
-        compute_dev_dependencies(
-            test_graph,
-            unit_graph,
-            metadata,
-            &meta_by_id,
-            &ctx.checksums,
-            &mut crates,
-        )?;
+    // When a test graph is available, classify dev-only dependencies on
+    // workspace members by comparing Build-mode vs Test-mode units within
+    // the test graph. No separate build graph needed — Build-mode units are
+    // the normal deps, Test-mode units add dev deps.
+    if test_unit_graph.is_some() {
+        classify_dev_dependencies(primary_graph, metadata, &mut crates)?;
     }
 
     // Roots
@@ -514,151 +525,87 @@ fn collect_build_dependencies(
 // Dev dependency computation
 // ---------------------------------------------------------------------------
 
-/// Index a unit graph into a map of `pkg_id` → set of dependency `pkg_ids`.
+/// Classify dev-only dependencies on workspace members.
 ///
-/// Used to build the "build graph" index for diffing against the test graph.
-fn index_build_deps(graph: &UnitGraph) -> BTreeMap<&str, HashSet<&str>> {
-    let pkg_ids: Vec<&str> = graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
-    let mut deps_by_pkg: BTreeMap<&str, HashSet<&str>> = BTreeMap::new();
-    for unit in &graph.units {
-        if unit.mode != UnitMode::Build {
-            continue;
-        }
-        if !unit.target.has_lib_like() && !unit.target.has_bin() {
-            continue;
-        }
-        let entry = deps_by_pkg.entry(unit.pkg_id.as_str()).or_default();
-        for dep in &unit.dependencies {
-            let dep_pkg_id = pkg_ids[dep.index];
-            if dep_pkg_id != unit.pkg_id.as_str() {
-                entry.insert(dep_pkg_id);
-            }
-        }
-    }
-    deps_by_pkg
-}
-
-/// Index a test unit graph into a map of `pkg_id` → list of `NixDep`.
-///
-/// Includes both Build and Test mode units (dev dependencies appear on
-/// mode=test units in `cargo test --unit-graph`).
-fn index_test_deps(graph: &UnitGraph) -> (Vec<&str>, BTreeMap<&str, Vec<NixDep>>) {
-    let pkg_ids: Vec<&str> = graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
-    let mut deps_by_pkg: BTreeMap<&str, Vec<NixDep>> = BTreeMap::new();
-    for unit in &graph.units {
-        match unit.mode {
-            UnitMode::Build | UnitMode::Test => {}
-            _ => continue,
-        }
-        if !unit.target.has_lib_like() && !unit.target.has_bin() {
-            continue;
-        }
-        let entry = deps_by_pkg.entry(unit.pkg_id.as_str()).or_default();
-        for dep in &unit.dependencies {
-            let dep_unit = &graph.units[dep.index];
-            let dep_pkg_id = pkg_ids[dep.index];
-            if dep_pkg_id == unit.pkg_id.as_str() {
-                continue;
-            }
-            if dep_unit.mode == UnitMode::RunCustomBuild {
-                continue;
-            }
-            entry.push(NixDep {
-                package_id: dep_pkg_id.to_string(),
-                extern_crate_name: dep.extern_crate_name.clone(),
-            });
-        }
-    }
-    (pkg_ids, deps_by_pkg)
-}
-
-/// Compute dev-only dependencies by diffing test and build unit graphs.
-///
-/// For each workspace member, finds dependencies that exist in the test graph
-/// but not in the build graph. Also adds any new crates to the build plan that
-/// are only needed for testing.
-fn compute_dev_dependencies(
+/// All crates are already built from the test graph (which is the superset).
+/// Dev deps are identified purely within the test graph by comparing unit
+/// modes: Build-mode units carry normal dependencies, Test-mode units add
+/// dev dependencies. The diff gives the dev-only set.
+fn classify_dev_dependencies(
     test_graph: &UnitGraph,
-    build_graph: &UnitGraph,
     metadata: &CargoMetadata,
-    meta_by_id: &BTreeMap<&str, &MetadataPackage>,
-    checksums: &BTreeMap<(&str, &str), &str>,
     crates: &mut BTreeMap<String, NixCrate>,
 ) -> Result<()> {
-    let build_deps_by_pkg = index_build_deps(build_graph);
-    let (test_pkg_ids, test_deps_by_pkg) = index_test_deps(test_graph);
+    let pkg_ids: Vec<&str> = test_graph.units.iter().map(|u| u.pkg_id.as_str()).collect();
 
-    // Identify workspace member pkg_ids
-    let ws_member_ids: HashSet<&str> = metadata
+    let ws_ids: HashSet<&str> = metadata
         .workspace_members
         .iter()
         .map(String::as_str)
         .collect();
 
-    // First pass: collect all pkg_ids that are dev-only (in test graph but not build plan)
-    let mut dev_only_pkg_ids: BTreeSet<String> = BTreeSet::new();
-    for pkg_id in &test_pkg_ids {
-        if !crates.contains_key(*pkg_id) {
-            dev_only_pkg_ids.insert((*pkg_id).to_string());
+    // For each workspace member, collect deps from Build-mode units (normal)
+    // and Test-mode units (normal + dev). The difference is the dev-only set.
+    let mut build_deps: BTreeMap<&str, HashSet<&str>> = BTreeMap::new();
+    let mut test_only_deps: BTreeMap<&str, Vec<NixDep>> = BTreeMap::new();
+
+    for unit in &test_graph.units {
+        if !ws_ids.contains(unit.pkg_id.as_str()) {
+            continue;
+        }
+        if !unit.target.has_lib_like() && !unit.target.has_bin() {
+            continue;
+        }
+
+        match unit.mode {
+            UnitMode::Build => {
+                let entry = build_deps.entry(unit.pkg_id.as_str()).or_default();
+                for dep in &unit.dependencies {
+                    let dep_pkg_id = pkg_ids[dep.index];
+                    if dep_pkg_id != unit.pkg_id.as_str() {
+                        entry.insert(dep_pkg_id);
+                    }
+                }
+            }
+            UnitMode::Test => {
+                let entry = test_only_deps.entry(unit.pkg_id.as_str()).or_default();
+                for dep in &unit.dependencies {
+                    let dep_unit = &test_graph.units[dep.index];
+                    let dep_pkg_id = pkg_ids[dep.index];
+                    if dep_pkg_id == unit.pkg_id.as_str() {
+                        continue;
+                    }
+                    if dep_unit.mode == UnitMode::RunCustomBuild {
+                        continue;
+                    }
+                    entry.push(NixDep {
+                        package_id: dep_pkg_id.to_string(),
+                        extern_crate_name: dep.extern_crate_name.clone(),
+                    });
+                }
+            }
+            _ => {}
         }
     }
 
-    // Group test graph units by pkg_id for build_nix_crate
-    let mut test_pkg_units: BTreeMap<&str, Vec<(usize, &Unit)>> = BTreeMap::new();
-    for (idx, unit) in test_graph.units.iter().enumerate() {
-        test_pkg_units
-            .entry(unit.pkg_id.as_str())
-            .or_default()
-            .push((idx, unit));
-    }
-
-    // Add dev-only crates to the build plan (they're needed as dependencies)
-    // Build a context for the test graph so build_nix_crate can resolve deps
-    let test_ctx = MergeContext {
-        unit_graph: test_graph,
-        unit_pkg_ids: test_pkg_ids.clone(),
-        checksums: checksums.clone(),
-        workspace_root: &metadata.workspace_root,
-    };
-
-    for dev_pkg_id in &dev_only_pkg_ids {
-        let meta_pkg = meta_by_id.get(dev_pkg_id.as_str()).copied();
-        let units = test_pkg_units
-            .get(dev_pkg_id.as_str())
+    for ws_id in &metadata.workspace_members {
+        let normal = build_deps.get(ws_id.as_str()).cloned().unwrap_or_default();
+        let test_deps = test_only_deps
+            .get(ws_id.as_str())
             .cloned()
             .unwrap_or_default();
 
-        let Some(nix_crate) = build_nix_crate(
-            &test_ctx,
-            dev_pkg_id,
-            &units,
-            meta_pkg,
-            false, // dev-only crates never include bin targets
-        )?
-        else {
-            continue;
-        };
-
-        crates.insert(dev_pkg_id.clone(), nix_crate);
-    }
-
-    // Second pass: compute dev-only deps for each workspace member
-    for ws_id in &ws_member_ids {
-        let build_dep_ids = build_deps_by_pkg.get(ws_id).cloned().unwrap_or_default();
-        let test_deps = test_deps_by_pkg.get(ws_id).cloned().unwrap_or_default();
-
-        // Dev deps = deps in test graph but not in build graph for this member
         let mut seen = HashSet::new();
         let dev_deps: Vec<NixDep> = test_deps
             .into_iter()
             .filter(|dep| {
-                !build_dep_ids.contains(dep.package_id.as_str())
+                !normal.contains(dep.package_id.as_str())
                     && seen.insert((dep.package_id.clone(), dep.extern_crate_name.clone()))
             })
             .collect();
 
         if !dev_deps.is_empty() {
-            if let Some(crate_info) = crates.get_mut(*ws_id) {
+            if let Some(crate_info) = crates.get_mut(ws_id.as_str()) {
                 crate_info.dev_dependencies = dev_deps;
             }
         }
@@ -1175,23 +1122,20 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // compute_dev_dependencies tests
+    // classify_dev_dependencies tests
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn compute_dev_dependencies_identifies_dev_only_deps() {
-        let build_graph = UnitGraph {
-            units: vec![
-                make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep_a")]),
-                make_unit("dep_a#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
-            ],
-            roots: vec![0],
-        };
-
+    fn classify_dev_dependencies_from_single_graph() {
+        // The test graph has Build-mode and Test-mode units for the workspace
+        // member. Dev deps are those on Test-mode units but not Build-mode.
         let test_graph = UnitGraph {
             units: vec![
+                // 0: ws_member Build-mode (normal deps)
                 make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep_a")]),
+                // 1: dep_a (normal dep)
                 make_unit("dep_a#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                // 2: ws_member Test-mode (normal + dev deps)
                 make_unit(
                     "ws_member#0.1.0",
                     vec![CrateKind::Lib],
@@ -1199,6 +1143,7 @@ mod tests {
                     vec![],
                     vec![(1, "dep_a"), (3, "dev_dep")],
                 ),
+                // 3: dev_dep (dev-only)
                 make_unit("dev_dep#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
             ],
             roots: vec![0],
@@ -1210,11 +1155,8 @@ mod tests {
             workspace_members: vec!["ws_member#0.1.0".to_string()],
         };
 
-        let meta_by_id = BTreeMap::new();
-        let checksums = BTreeMap::new();
+        // Pre-populate crates as merge() would (built from test graph)
         let mut crates = BTreeMap::new();
-
-        // Pre-populate with ws_member and dep_a (from build graph)
         let mut ws_member = make_nix_crate("ws_member", "0.1.0");
         ws_member.dependencies = vec![NixDep {
             package_id: "dep_a#0.2.0".to_string(),
@@ -1222,42 +1164,36 @@ mod tests {
         }];
         crates.insert("ws_member#0.1.0".to_string(), ws_member);
         crates.insert("dep_a#0.2.0".to_string(), make_nix_crate("dep_a", "0.2.0"));
+        crates.insert("dev_dep#0.3.0".to_string(), make_nix_crate("dev_dep", "0.3.0"));
 
-        compute_dev_dependencies(
-            &test_graph,
-            &build_graph,
-            &metadata,
-            &meta_by_id,
-            &checksums,
-            &mut crates,
-        )
-        .unwrap();
+        classify_dev_dependencies(&test_graph, &metadata, &mut crates).unwrap();
 
-        // dev_dep should have been added to crates
-        assert!(crates.contains_key("dev_dep#0.3.0"));
-
-        // ws_member should now have dev_dependencies
         let ws_crate = &crates["ws_member#0.1.0"];
         assert_eq!(ws_crate.dev_dependencies.len(), 1);
         assert_eq!(ws_crate.dev_dependencies[0].package_id, "dev_dep#0.3.0");
         assert_eq!(ws_crate.dev_dependencies[0].extern_crate_name, "dev_dep");
     }
 
+    // ---------------------------------------------------------------------------
+    // merge with test graph (end-to-end)
+    // ---------------------------------------------------------------------------
+
+    /// Dev-only crates appear in the build plan when a test graph is provided.
     #[test]
-    fn compute_dev_dependencies_adds_dev_only_crates() {
+    fn merge_with_test_graph_includes_dev_only_crates() {
         let build_graph = UnitGraph {
-            units: vec![make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![])],
+            units: vec![make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![])],
             roots: vec![0],
         };
-
         let test_graph = UnitGraph {
             units: vec![
+                make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
                 make_unit(
-                    "ws_member#0.1.0",
+                    "ws#0.1.0",
                     vec![CrateKind::Lib],
                     UnitMode::Test,
                     vec![],
-                    vec![(1, "test_only")],
+                    vec![(2, "test_only")],
                 ),
                 make_unit("test_only#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
             ],
@@ -1265,30 +1201,86 @@ mod tests {
         };
 
         let metadata = CargoMetadata {
-            packages: vec![],
+            packages: vec![make_meta_pkg("ws#0.1.0", None, "/workspace/Cargo.toml")],
             workspace_root: "/workspace".to_string(),
-            workspace_members: vec!["ws_member#0.1.0".to_string()],
+            workspace_members: vec!["ws#0.1.0".to_string()],
+        };
+        let lock = CargoLock { package: None };
+
+        let plan = merge(&build_graph, &metadata, &lock, None, "h".to_string(), Some(&test_graph), None).unwrap();
+
+        assert!(plan.crates.contains_key("test_only#0.1.0"));
+        assert_eq!(plan.crates["test_only#0.1.0"].crate_name, "test_only");
+    }
+
+    /// Regression test: crates in both build and test graphs get the test
+    /// graph's feature set (the superset) because merge() builds from the
+    /// test graph as primary source.
+    ///
+    /// Real-world scenario: `zerocopy` has `["simd"]` in the build graph but
+    /// `["derive", "simd", "zerocopy-derive"]` in the test graph because
+    /// `half` (a dev-dep via criterion) requests the `derive` feature.
+    #[test]
+    fn merge_with_test_graph_uses_superset_features() {
+        let zc_id = "registry+https://github.com/rust-lang/crates.io-index#zerocopy@0.8.40";
+        let zc_derive_id = "registry+https://github.com/rust-lang/crates.io-index#zerocopy-derive@0.8.40";
+
+        let build_graph = UnitGraph {
+            units: vec![
+                make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "zerocopy")]),
+                make_unit(zc_id, vec![CrateKind::Lib], UnitMode::Build, vec!["simd"], vec![]),
+            ],
+            roots: vec![0],
         };
 
-        let meta_by_id = BTreeMap::new();
-        let checksums = BTreeMap::new();
-        let mut crates = BTreeMap::new();
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "zerocopy")]),
+                make_unit(
+                    zc_id,
+                    vec![CrateKind::Lib],
+                    UnitMode::Build,
+                    vec!["derive", "simd", "zerocopy-derive"],
+                    vec![(2, "zerocopy_derive")],
+                ),
+                make_unit(zc_derive_id, vec![CrateKind::ProcMacro], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "ws#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "zerocopy"), (4, "half")],
+                ),
+                make_unit("half#2.0.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "zerocopy")]),
+            ],
+            roots: vec![0],
+        };
 
-        crates.insert("ws_member#0.1.0".to_string(), make_nix_crate("ws_member", "0.1.0"));
+        let metadata = CargoMetadata {
+            packages: vec![make_meta_pkg("ws#0.1.0", None, "/workspace/Cargo.toml")],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws#0.1.0".to_string()],
+        };
+        let lock = CargoLock { package: None };
 
-        compute_dev_dependencies(
-            &test_graph,
-            &build_graph,
-            &metadata,
-            &meta_by_id,
-            &checksums,
-            &mut crates,
-        )
-        .unwrap();
+        let plan = merge(&build_graph, &metadata, &lock, None, "h".to_string(), Some(&test_graph), None).unwrap();
 
-        // test_only crate should have been added to the build plan
-        assert!(crates.contains_key("test_only#0.1.0"));
-        assert_eq!(crates["test_only#0.1.0"].crate_name, "test_only");
+        // zerocopy gets the test graph's superset features
+        let zc = &plan.crates[zc_id];
+        assert_eq!(zc.features, vec!["derive", "simd", "zerocopy-derive"]);
+
+        // zerocopy-derive is a dependency of zerocopy (from the derive feature)
+        let zc_dep_ids: Vec<&str> = zc.dependencies.iter().map(|d| d.package_id.as_str()).collect();
+        assert!(zc_dep_ids.contains(&zc_derive_id));
+
+        // zerocopy-derive and half both in the plan
+        assert!(plan.crates.contains_key(zc_derive_id));
+        assert!(plan.crates.contains_key("half#2.0.0"));
+
+        // half is classified as a dev-dep of the workspace member
+        let ws = &plan.crates["ws#0.1.0"];
+        let dev_dep_ids: Vec<&str> = ws.dev_dependencies.iter().map(|d| d.package_id.as_str()).collect();
+        assert!(dev_dep_ids.contains(&"half#2.0.0"));
     }
 
     // ---------------------------------------------------------------------------
