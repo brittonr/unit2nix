@@ -41,6 +41,7 @@
               skipStalenessCheck ? false,
               clippyArgs ? [],
               members ? null,
+              rustToolchain ? null,
             }:
             import ./lib/build-from-unit-graph.nix {
               inherit
@@ -53,6 +54,7 @@
                 skipStalenessCheck
                 clippyArgs
                 members
+                rustToolchain
                 ;
             };
 
@@ -138,6 +140,66 @@
             nixComponents = pkgs.nixVersions.nixComponents_2_33;
           };
 
+          # Vendor crate sources from a single Cargo.lock.
+          # Returns { vendoredSources, cargoConfig, gitCheckouts }.
+          vendorCargoDeps =
+            {
+              pkgs ? nixpkgs.legacyPackages.${system},
+              cargoLock,
+              crateHashesJson ? null,
+            }:
+            import ./lib/vendor.nix {
+              inherit pkgs cargoLock crateHashesJson;
+            };
+
+          # Vendor crate sources from multiple Cargo.lock files.
+          # Merges all lock files and produces a single vendor directory.
+          # Returns { vendoredSources, cargoConfig, gitCheckouts }.
+          vendorMultipleCargoDeps =
+            {
+              pkgs ? nixpkgs.legacyPackages.${system},
+              cargoLocks,
+              crateHashesJson ? null,
+            }:
+            let
+              lib = pkgs.lib;
+
+              # Parse all lock files
+              allLocked = map (lock: lib.importTOML lock) cargoLocks;
+
+              # Merge all packages, deduplicating by (name, version, source)
+              allPackages = builtins.concatLists (map (l: l.package or [ ]) allLocked);
+              withSource = builtins.filter (p: p ? source) allPackages;
+              byId = builtins.listToAttrs (
+                map (p: { name = "${p.name} ${p.version} (${p.source})"; value = p; }) withSource
+              );
+
+              # Write a synthetic merged lock file for vendor.nix
+              mergedLock = pkgs.writeText "merged-Cargo.lock" (
+                builtins.toJSON {
+                  package = builtins.attrValues byId;
+                }
+              );
+
+              # vendor.nix expects TOML, but we can just pass the merged packages
+              # directly. Create a minimal TOML lock file.
+              mergedLockToml = pkgs.writeText "merged-Cargo.lock" (
+                "# Merged lock file\nversion = 3\n\n"
+                + lib.concatMapStrings (p:
+                  "[[package]]\n"
+                  + "name = ${builtins.toJSON p.name}\n"
+                  + "version = ${builtins.toJSON p.version}\n"
+                  + lib.optionalString (p ? source) "source = ${builtins.toJSON p.source}\n"
+                  + lib.optionalString (p ? checksum) "checksum = ${builtins.toJSON p.checksum}\n"
+                  + "\n"
+                ) (builtins.attrValues byId)
+              );
+            in
+            import ./lib/vendor.nix {
+              inherit pkgs crateHashesJson;
+              cargoLock = mergedLockToml;
+            };
+
           crateOverridesLib = import ./lib/crate-overrides.nix { inherit pkgs; };
 
           sampleWorkspace = buildFromUnitGraph {
@@ -148,7 +210,13 @@
         in
         {
           lib = {
-            inherit buildFromUnitGraph buildFromUnitGraphAuto buildFromUnitGraphPlugin;
+            inherit
+              buildFromUnitGraph
+              buildFromUnitGraphAuto
+              buildFromUnitGraphPlugin
+              vendorCargoDeps
+              vendorMultipleCargoDeps
+              ;
             crateOverrides = crateOverridesLib.overrides;
             isKnownNoOverride = crateOverridesLib.isKnownNoOverride;
           };

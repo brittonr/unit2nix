@@ -37,6 +37,11 @@
   # Extra arguments passed to clippy-driver (e.g. ["-D" "warnings"]).
   # Used by the .clippy output — has no effect on normal builds.
   clippyArgs ? [],
+  # Optional: custom Rust toolchain containing rustc + clippy-driver.
+  # When set, the .clippy output uses this instead of pkgs.clippy + pkgs.rustc.
+  # Required when buildRustCrateForPkgs uses a custom toolchain (e.g. from
+  # rust-overlay) since the sysroot and clippy-driver must match the compiler.
+  rustToolchain ? null,
   # Optional: filter which workspace members are exposed.
   # When set, only listed member names appear in workspaceMembers,
   # allWorkspaceMembers, test, and clippy outputs.
@@ -357,19 +362,22 @@ let
 
   clippyRustcWrapper =
     let
-      clippy = pkgs.clippy;
-      rustc = pkgs.rustc;
+      # When a custom toolchain is provided (e.g. rust-overlay nightly),
+      # use it for both clippy-driver and the sysroot. The toolchain must
+      # include the clippy component.
+      clippyDrv = if rustToolchain != null then rustToolchain else pkgs.clippy;
+      rustcDrv = if rustToolchain != null then rustToolchain else pkgs.rustc;
       extraArgs = lib.concatMapStringsSep " " lib.escapeShellArg clippyArgs;
     in
     pkgs.runCommand "clippy-as-rustc"
       { nativeBuildInputs = [ pkgs.makeWrapper ]; }
       ''
         mkdir -p $out/bin $out/lib
-        # Symlink the real rustc's libs (sysroot) so clippy-driver finds them
-        ln -s ${rustc}/lib/* $out/lib/
+        # Symlink the compiler's libs (sysroot) so clippy-driver finds them
+        ln -s ${rustcDrv}/lib/* $out/lib/
 
         # Wrap clippy-driver as "rustc" so buildRustCrate runs clippy
-        makeWrapper ${clippy}/bin/clippy-driver $out/bin/rustc \
+        makeWrapper ${clippyDrv}/bin/clippy-driver $out/bin/rustc \
           ${lib.optionalString (clippyArgs != []) ''--add-flags "${extraArgs}"''}
       '';
 
