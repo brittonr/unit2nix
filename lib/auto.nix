@@ -46,6 +46,16 @@
   # When true, ALL workspace members are resolved (including dev-deps),
   # enabling test.check.<member> for every crate in the workspace.
   workspace ? false,
+  # Optional: build a specific package (passed as -p to unit2nix)
+  package ? null,
+  # Optional: features to enable (comma-separated string, passed as --features)
+  features ? null,
+  # Optional: enable all features
+  allFeatures ? false,
+  # Optional: disable default features
+  noDefaultFeatures ? false,
+  # Optional: include dev-dependencies in the resolve
+  includeDev ? false,
 }:
 
 let
@@ -194,6 +204,11 @@ let
 
     unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
       ${lib.optionalString workspace "--workspace"} \
+      ${lib.optionalString (package != null) "-p ${lib.escapeShellArg package}"} \
+      ${lib.optionalString (features != null) "--features ${lib.escapeShellArg features}"} \
+      ${lib.optionalString allFeatures "--all-features"} \
+      ${lib.optionalString noDefaultFeatures "--no-default-features"} \
+      ${lib.optionalString includeDev "--include-dev"} \
       ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"}
   '';
 

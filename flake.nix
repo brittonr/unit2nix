@@ -77,6 +77,16 @@
               # Pass --workspace to cargo for per-crate test support.
               # When true, ALL workspace members and their dev-deps are resolved.
               workspace ? false,
+              # Optional: build a specific package (-p flag)
+              package ? null,
+              # Optional: features to enable (comma-separated string)
+              features ? null,
+              # Optional: enable all features
+              allFeatures ? false,
+              # Optional: disable default features
+              noDefaultFeatures ? false,
+              # Optional: include dev-dependencies
+              includeDev ? false,
             }:
             import ./lib/auto.nix {
               inherit
@@ -90,6 +100,11 @@
                 members
                 rustToolchain
                 workspace
+                package
+                features
+                allFeatures
+                noDefaultFeatures
+                includeDev
                 ;
               unit2nix = self.packages.${system}.unit2nix;
             };
