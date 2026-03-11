@@ -55,7 +55,7 @@ let
     if resolvedData != null then
       resolvedData
     else if resolvedJson != null then
-      builtins.fromJSON (builtins.readFile resolvedJson)
+      builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile resolvedJson))
     else
       throw "build-from-unit-graph.nix: either resolvedJson or resolvedData must be provided";
 
