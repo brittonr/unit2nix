@@ -96,6 +96,7 @@ let
     _work_dir=$(mktemp -d)
     cp -r ${repo.src}/* "$_work_dir/" 2>/dev/null || true
     cp -r ${repo.src}/.* "$_work_dir/" 2>/dev/null || true
+    chmod -R u+w "$_work_dir"
     export GIT_DIR="$_repo_dir"
     export GIT_WORK_TREE="$_work_dir"
     export GIT_AUTHOR_NAME="vendor" GIT_AUTHOR_EMAIL="vendor@localhost"
