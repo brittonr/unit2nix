@@ -429,16 +429,32 @@ fn apply_members_filter(
 // Dependency / feature collection helpers
 // ---------------------------------------------------------------------------
 
-/// Collect deduplicated, sorted features across all lib-like units for a package.
+/// Collect deduplicated, sorted features across all buildable units for a package.
 ///
 /// The same crate can appear multiple times in the unit graph with different
 /// feature sets (e.g., `hashbrown`: once with no features for a proc-macro's
 /// host dep, once with `"default"` for a target dep). Nix builds one derivation
 /// per crate, so it needs the superset.
+///
+/// Prefers lib-like units (lib, proc-macro) since they carry the canonical
+/// feature set. Falls back to bin units for bin-only crates (no lib target)
+/// where features are only present on bin units.
 fn collect_features(units: &[(usize, &Unit)]) -> Vec<String> {
     let mut features = BTreeSet::new();
+    let has_lib = units
+        .iter()
+        .any(|(_, u)| u.mode == UnitMode::Build && u.target.has_lib_like());
+
     for (_, u) in units {
-        if u.mode == UnitMode::Build && u.target.has_lib_like() {
+        if u.mode != UnitMode::Build {
+            continue;
+        }
+        let dominated_unit = if has_lib {
+            u.target.has_lib_like()
+        } else {
+            u.target.has_bin()
+        };
+        if dominated_unit {
             for f in &u.features {
                 features.insert(f.clone());
             }
@@ -871,6 +887,51 @@ mod tests {
             vec![],
         );
         let units = vec![(0, &unit0), (1, &unit1)];
+        let features = collect_features(&units);
+        assert_eq!(features, vec!["lib_feature"]);
+    }
+
+    #[test]
+    fn collect_features_bin_only_crate() {
+        // Bin-only crates (no lib target) should collect features from bin units.
+        let unit0 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Bin],
+            UnitMode::Build,
+            vec!["ci", "forge"],
+            vec![],
+        );
+        let unit1 = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::CustomBuild],
+            UnitMode::Build,
+            vec!["build_feature"],
+            vec![],
+        );
+        let units = vec![(0, &unit0), (1, &unit1)];
+        let features = collect_features(&units);
+        assert_eq!(features, vec!["ci", "forge"]);
+    }
+
+    #[test]
+    fn collect_features_lib_takes_precedence_over_bin() {
+        // When both lib and bin exist, only lib features are collected
+        // (bin inherits from lib in cargo's model).
+        let lib_unit = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["lib_feature"],
+            vec![],
+        );
+        let bin_unit = make_unit(
+            "pkg#0.1.0",
+            vec![CrateKind::Bin],
+            UnitMode::Build,
+            vec!["bin_feature"],
+            vec![],
+        );
+        let units = vec![(0, &lib_unit), (1, &bin_unit)];
         let features = collect_features(&units);
         assert_eq!(features, vec!["lib_feature"]);
     }
