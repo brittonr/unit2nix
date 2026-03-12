@@ -56,6 +56,14 @@
   noDefaultFeatures ? false,
   # Optional: include dev-dependencies in the resolve
   includeDev ? false,
+  # Optional: build a specific binary target (passed as --bin to unit2nix).
+  # More restrictive than 'package': only captures deps for one binary,
+  # avoiding resolution of optional path deps used by other targets.
+  bin ? null,
+  # Don't pass --locked to cargo. Needed when external optional deps have
+  # been stripped from the manifest but their transitive deps remain in
+  # Cargo.lock.
+  noLocked ? false,
 }:
 
 let
@@ -79,38 +87,19 @@ let
       else null;
   };
 
-  # Map of git URL → rev for the git wrapper.
-  # Store paths are resolved at build time (see generatedPlan) because
-  # vendor.nix fetches plain source checkouts (no .git), and we init
-  # bare repos from them inside the non-FOD build derivation.
-  gitRepoList = vendor.gitCheckouts;
-
-  # Build-time script that initialises bare git repos from plain source
-  # checkouts. Produces a repo-map file mapping URL+rev to local bare repo.
+  # Build-time script: copy .git contents from read-only fetchgit outputs
+  # to writable bare repos. This preserves the real commit SHAs that cargo
+  # needs to resolve specific revisions, without touching the nix store.
   initGitReposScript = lib.concatMapStrings (repo: ''
     _repo_dir="/tmp/git-repos/$(echo '${repo.url}' | sed 's|[/:]|_|g')"
     mkdir -p "$_repo_dir"
-    ${pkgs.git}/bin/git init --bare "$_repo_dir" 2>/dev/null
-
-    # Create a temporary work tree, add all files, commit
-    _work_dir=$(mktemp -d)
-    cp -r ${repo.src}/* "$_work_dir/" 2>/dev/null || true
-    cp -r ${repo.src}/.* "$_work_dir/" 2>/dev/null || true
-    chmod -R u+w "$_work_dir"
-    export GIT_DIR="$_repo_dir"
-    export GIT_WORK_TREE="$_work_dir"
-    export GIT_AUTHOR_NAME="vendor" GIT_AUTHOR_EMAIL="vendor@localhost"
-    export GIT_COMMITTER_NAME="vendor" GIT_COMMITTER_EMAIL="vendor@localhost"
-    export GIT_AUTHOR_DATE="1970-01-01T00:00:00Z" GIT_COMMITTER_DATE="1970-01-01T00:00:00Z"
-    ${pkgs.git}/bin/git add -A 2>/dev/null
-    ${pkgs.git}/bin/git commit -m "vendor" --allow-empty 2>/dev/null
-    unset GIT_DIR GIT_WORK_TREE GIT_AUTHOR_DATE GIT_COMMITTER_DATE
-    rm -rf "$_work_dir"
-
+    cp -r ${repo.src}/.git/* "$_repo_dir/" 2>/dev/null || true
+    cp -r ${repo.src}/.git/.* "$_repo_dir/" 2>/dev/null || true
+    chmod -R u+w "$_repo_dir"
+    # Remove hooks that may reference nix store paths
+    rm -rf "$_repo_dir/hooks"
     echo '${repo.url} ${repo.rev} '"$_repo_dir" >> /tmp/git-repo-map
-  '') gitRepoList;
-
-  gitRepoMapFile = pkgs.writeText "git-repo-map-placeholder" "";
+  '') vendor.gitCheckouts;
 
   # Wrapper script that intercepts `git` clone/fetch operations.
   # Cargo with net.git-fetch-with-cli invokes:
@@ -234,10 +223,12 @@ let
     unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
       ${lib.optionalString workspace "--workspace"} \
       ${lib.optionalString (package != null) "-p ${lib.escapeShellArg package}"} \
+      ${lib.optionalString (bin != null) "--bin ${lib.escapeShellArg bin}"} \
       ${lib.optionalString (features != null) "--features ${lib.escapeShellArg features}"} \
       ${lib.optionalString allFeatures "--all-features"} \
       ${lib.optionalString noDefaultFeatures "--no-default-features"} \
       ${lib.optionalString includeDev "--include-dev"} \
+      ${lib.optionalString noLocked "--no-locked"} \
       ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"}
   '';
 

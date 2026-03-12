@@ -79,6 +79,7 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
         json: false,
         force: false,
         workspace: input.workspace,
+        no_locked: false,
     };
 
     let members_filter = cli.members_filter();

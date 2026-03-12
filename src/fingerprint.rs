@@ -151,6 +151,7 @@ mod tests {
             json: false,
             force: false,
             workspace: false,
+            no_locked: false,
         }
     }
 

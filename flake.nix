@@ -87,6 +87,11 @@
               noDefaultFeatures ? false,
               # Optional: include dev-dependencies
               includeDev ? false,
+              # Optional: build a specific binary target (--bin flag).
+              # More restrictive than package: only captures deps for one binary.
+              bin ? null,
+              # Don't pass --locked to cargo.
+              noLocked ? false,
             }:
             import ./lib/auto.nix {
               inherit
@@ -101,6 +106,8 @@
                 rustToolchain
                 workspace
                 package
+                bin
+                noLocked
                 features
                 allFeatures
                 noDefaultFeatures

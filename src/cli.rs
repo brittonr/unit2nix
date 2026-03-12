@@ -98,6 +98,15 @@ pub struct Cli {
     /// are captured for per-crate test support.
     #[arg(long)]
     pub workspace: bool,
+
+    /// Don't pass --locked to cargo.
+    ///
+    /// By default, unit2nix passes --locked to all cargo invocations to ensure
+    /// the lockfile matches the manifest exactly. Use --no-locked when the
+    /// workspace manifest has been modified (e.g., stripping optional external
+    /// deps) and the lockfile contains entries that no longer match.
+    #[arg(long)]
+    pub no_locked: bool,
 }
 
 impl Cli {

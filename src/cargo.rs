@@ -94,8 +94,10 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
         "--unit-graph",
         "-Z",
         "unstable-options",
-        "--locked",
     ];
+    if !cli.no_locked {
+        args.push("--locked");
+    }
     append_common_args(&mut args, cli);
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo build --unit-graph")?;
@@ -115,9 +117,11 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
         "--unit-graph",
         "-Z",
         "unstable-options",
-        "--locked",
         "--no-run",
     ];
+    if !cli.no_locked {
+        args.push("--locked");
+    }
     append_common_args(&mut args, cli);
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo test --unit-graph")?;
@@ -129,7 +133,11 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid metadata JSON.
 pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
-    let args = ["metadata", "--format-version=1", "--locked"];
+    let mut args = vec!["metadata", "--format-version=1"];
+    if !cli.no_locked {
+        args.push("--locked");
+    }
+    let args = args;
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo metadata")?;
     serde_json::from_slice(&stdout).context("failed to parse cargo metadata JSON")
 }
