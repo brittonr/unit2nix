@@ -136,10 +136,11 @@ let
         if parsed.fragment != null then parsed.fragment
         else parsed.rev or (builtins.throw "unit2nix: git dep '${representativePkg.name}' has no rev in source URL");
 
-      # For the auto-build git wrapper, we need actual git repos (with .git).
-      # fetchgit with leaveDotGit preserves it. Without a known sha256, we
-      # can't use fetchgit, so git deps without hashes in crate-hashes.json
-      # will cause a build failure with a clear error message.
+      # Fetch git dep source without .git directory. auto.nix initialises
+      # bare repos from these plain checkouts inside the (non-FOD) IFD
+      # derivation, so fakeGit can serve them to cargo.
+      # Using leaveDotGit = true would create a FOD whose output references
+      # bash (via .git/hooks shebangs), which Nix rejects.
       src =
         if sha256 != null then
           pkgs.fetchgit {
@@ -147,7 +148,6 @@ let
             inherit (parsed) url;
             inherit rev;
             fetchSubmodules = true;
-            leaveDotGit = true;
           }
         else
           builtins.throw ''

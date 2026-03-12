@@ -79,13 +79,37 @@ let
       else null;
   };
 
-  # Map of git URL → pre-fetched store path for the git wrapper.
-  # Format: one "url rev storepath" per line.
-  gitRepoMap = lib.concatMapStrings (repo: ''
-    ${repo.url} ${repo.rev} ${repo.src}
-  '') vendor.gitCheckouts;
+  # Map of git URL → rev for the git wrapper.
+  # Store paths are resolved at build time (see generatedPlan) because
+  # vendor.nix fetches plain source checkouts (no .git), and we init
+  # bare repos from them inside the non-FOD build derivation.
+  gitRepoList = vendor.gitCheckouts;
 
-  gitRepoMapFile = pkgs.writeText "git-repo-map" gitRepoMap;
+  # Build-time script that initialises bare git repos from plain source
+  # checkouts. Produces a repo-map file mapping URL+rev to local bare repo.
+  initGitReposScript = lib.concatMapStrings (repo: ''
+    _repo_dir="/tmp/git-repos/$(echo '${repo.url}' | sed 's|[/:]|_|g')"
+    mkdir -p "$_repo_dir"
+    ${pkgs.git}/bin/git init --bare "$_repo_dir" 2>/dev/null
+
+    # Create a temporary work tree, add all files, commit
+    _work_dir=$(mktemp -d)
+    cp -r ${repo.src}/* "$_work_dir/" 2>/dev/null || true
+    cp -r ${repo.src}/.* "$_work_dir/" 2>/dev/null || true
+    export GIT_DIR="$_repo_dir"
+    export GIT_WORK_TREE="$_work_dir"
+    export GIT_AUTHOR_NAME="vendor" GIT_AUTHOR_EMAIL="vendor@localhost"
+    export GIT_COMMITTER_NAME="vendor" GIT_COMMITTER_EMAIL="vendor@localhost"
+    export GIT_AUTHOR_DATE="1970-01-01T00:00:00Z" GIT_COMMITTER_DATE="1970-01-01T00:00:00Z"
+    ${pkgs.git}/bin/git add -A 2>/dev/null
+    ${pkgs.git}/bin/git commit -m "vendor" --allow-empty 2>/dev/null
+    unset GIT_DIR GIT_WORK_TREE GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+    rm -rf "$_work_dir"
+
+    echo '${repo.url} ${repo.rev} '"$_repo_dir" >> /tmp/git-repo-map
+  '') gitRepoList;
+
+  gitRepoMapFile = pkgs.writeText "git-repo-map-placeholder" "";
 
   # Wrapper script that intercepts `git` clone/fetch operations.
   # Cargo with net.git-fetch-with-cli invokes:
@@ -123,7 +147,7 @@ let
           local_rev="$map_rev"
           break
         fi
-      done < ${gitRepoMapFile}
+      done < /tmp/git-repo-map
     fi
 
     if [ -z "$local_path" ]; then
@@ -189,6 +213,10 @@ let
       [net]
       git-fetch-with-cli = true
     GITCFG
+
+      # Initialise bare git repos from plain source checkouts
+      touch /tmp/git-repo-map
+      ${initGitReposScript}
 
       # Put our git wrapper first on PATH so cargo uses it
       mkdir -p /tmp/fake-git-bin
