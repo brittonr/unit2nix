@@ -86,7 +86,8 @@ pub enum NixSource {
         rev: String,
         /// Subdirectory within the git repo (for monorepo deps).
         /// Only present when the crate isn't at the repo root.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        /// Serialized as `subDir` to match fetch-source.nix expectations.
+        #[serde(rename = "subDir", skip_serializing_if = "Option::is_none")]
         sub_dir: Option<String>,
         /// SHA256 hash from nix-prefetch-git. When present, the Nix consumer
         /// uses `pkgs.fetchgit` (a fixed-output derivation) for pure evaluation.
