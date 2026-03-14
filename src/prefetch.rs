@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -10,6 +11,93 @@ use crate::output::{NixBuildPlan, NixSource};
 #[derive(Debug, Deserialize)]
 struct PrefetchGitResult {
     sha256: String,
+}
+
+/// Load crate-hashes.json from the workspace root and pre-fill sha256 values
+/// for git sources in the build plan.
+///
+/// crate-hashes.json keys have the format:
+///   `{url}?rev={rev}#{crate}@{version}` or `{url}#{crate}@{version}`
+///
+/// The sha256 values are SRI hashes (e.g. `sha256-xxxx=`), which `pkgs.fetchgit`
+/// accepts directly.
+///
+/// This avoids calling `nix-prefetch-git` inside sandboxed derivations where
+/// network access is unavailable.
+pub fn apply_crate_hashes(plan: &mut NixBuildPlan, manifest_path: &Path) -> Result<()> {
+    let hashes_path = manifest_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("crate-hashes.json");
+
+    if !hashes_path.exists() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&hashes_path)
+        .with_context(|| format!("failed to read {}", hashes_path.display()))?;
+
+    let hashes: BTreeMap<String, String> = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", hashes_path.display()))?;
+
+    if hashes.is_empty() {
+        return Ok(());
+    }
+
+    // Index hashes by (url, rev) for fast lookup.
+    // Multiple crates from the same repo share the same hash.
+    let mut by_url_rev: BTreeMap<(String, String), String> = BTreeMap::new();
+    for (key, hash) in &hashes {
+        if let Some((url, rev)) = parse_crate_hash_key(key) {
+            by_url_rev.entry((url, rev)).or_insert_with(|| hash.clone());
+        }
+    }
+
+    let mut applied = 0u32;
+    for crate_info in plan.crates.values_mut() {
+        if let Some(NixSource::Git {
+            url,
+            rev,
+            sha256: sha256 @ None,
+            ..
+        }) = &mut crate_info.source
+        {
+            if let Some(hash) = by_url_rev.get(&(url.clone(), rev.clone())) {
+                *sha256 = Some(hash.clone());
+                applied += 1;
+            }
+        }
+    }
+
+    if applied > 0 {
+        eprintln!("Applied {applied} git source hash(es) from crate-hashes.json");
+    }
+
+    Ok(())
+}
+
+/// Parse a crate-hashes.json key into (url, rev).
+///
+/// Key formats:
+///   `https://example.com/repo.git?rev=abc123#crate@1.0.0`
+///   `https://example.com/repo.git#crate@1.0.0` (no rev in URL)
+fn parse_crate_hash_key(key: &str) -> Option<(String, String)> {
+    // Split on '#' — left side is URL (possibly with ?rev=), right is crate info
+    let url_part = key.split('#').next()?;
+
+    // Extract URL base and rev from query params
+    let (base_url, rev) = if let Some(query_start) = url_part.find('?') {
+        let base = &url_part[..query_start];
+        let query = &url_part[query_start + 1..];
+        let rev = query
+            .split('&')
+            .find_map(|param| param.strip_prefix("rev="))?;
+        (base.to_string(), rev.to_string())
+    } else {
+        return None; // No rev in URL — can't match
+    };
+
+    Some((base_url, rev))
 }
 
 /// Run `nix-prefetch-git` to get the SHA256 of a git checkout.
@@ -98,4 +186,39 @@ pub fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_key_with_rev() {
+        let key = "https://git.snix.dev/snix/snix.git?rev=180bfc4ce41a#nix-compat@0.1.0";
+        let (url, rev) = parse_crate_hash_key(key).unwrap();
+        assert_eq!(url, "https://git.snix.dev/snix/snix.git");
+        assert_eq!(rev, "180bfc4ce41a");
+    }
+
+    #[test]
+    fn parse_key_with_full_rev() {
+        let key = "https://git.snix.dev/snix/snix.git?rev=180bfc4ce41ad25016aae2e3eb4e7af8c3d185ac#nix-compat@0.1.0";
+        let (url, rev) = parse_crate_hash_key(key).unwrap();
+        assert_eq!(url, "https://git.snix.dev/snix/snix.git");
+        assert_eq!(rev, "180bfc4ce41ad25016aae2e3eb4e7af8c3d185ac");
+    }
+
+    #[test]
+    fn parse_key_no_rev_returns_none() {
+        let key = "https://github.com/n0-computer/iroh-experiments#h3-iroh@0.1.0";
+        assert!(parse_crate_hash_key(key).is_none());
+    }
+
+    #[test]
+    fn parse_key_github_with_rev() {
+        let key = "https://github.com/s2-streamstore/mad-turmoil?rev=ef75169#mad-turmoil@0.2.0";
+        let (url, rev) = parse_crate_hash_key(key).unwrap();
+        assert_eq!(url, "https://github.com/s2-streamstore/mad-turmoil");
+        assert_eq!(rev, "ef75169");
+    }
 }

@@ -97,7 +97,11 @@ pub fn run(cli: &Cli) -> Result<()> {
         eprintln!("  target: {t}");
     }
 
-    // Prefetch git sources for pure flake evaluation
+    // Apply pre-computed hashes from crate-hashes.json (avoids nix-prefetch-git
+    // calls inside sandboxed derivations where network is unavailable).
+    prefetch::apply_crate_hashes(&mut plan, &cli.manifest_path)?;
+
+    // Prefetch remaining git sources that weren't in crate-hashes.json
     prefetch::prefetch_git_sources(&mut plan)?;
 
     // Store the inputs fingerprint so the next run can skip if unchanged
