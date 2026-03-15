@@ -133,6 +133,17 @@ let
 
   fetchSource = import ./fetch-source.nix { inherit pkgs src rustSrcPath; };
 
+  # Stdlib crate detection for build-std support.
+  # When a build plan contains stdlib crates (core, alloc, compiler_builtins),
+  # they must be built for the TARGET but NOT for the HOST. The host rustc
+  # already provides these via its sysroot — passing them as --extern causes
+  # "duplicate lang item" errors.
+  stdlibPackageIds = lib.filterAttrs
+    (_pid: info: (info.source.type or null) == "stdlib")
+    resolved.crates;
+  isStdlibCrate = packageId: stdlibPackageIds ? ${packageId};
+  hasStdlibCrates = stdlibPackageIds != {};
+
   # Built-in crate overrides from unit2nix (ring, tikv-jemalloc-sys, etc.)
   crateOverridesLib = import ./crate-overrides.nix { inherit pkgs; };
 
@@ -151,7 +162,12 @@ let
       pkgs.defaultCrateOverrides // crateOverridesLib.overrides // extraCrateOverrides;
 
   # Build the recursive crate set for a given pkgs instance.
+  #
+  # isHost: when true, this is the host (build-platform) crate set used for
+  # build scripts and proc-macros. Stdlib crates are excluded — the host
+  # rustc provides core/alloc via its sysroot.
   mkBuiltByPackageIdByPkgs =
+    { isHost ? false }:
     cratePkgs:
     let
       buildRustCrate =
@@ -160,14 +176,23 @@ let
         in
         base.override { defaultCrateOverrides = mergedOverrides; };
 
+      # On the host path, exclude stdlib crates entirely. They're never
+      # needed — the host compiler has them in its sysroot. Including them
+      # would cause "duplicate lang item" errors.
+      buildableCrates =
+        if isHost && hasStdlibCrates then
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+        else
+          resolved.crates;
+
       self = {
         # Each crate keyed by its full package ID
         crates = lib.mapAttrs (
-          packageId: _: buildCrate self cratePkgs buildRustCrate packageId {}
-        ) resolved.crates;
+          packageId: _: buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId {}
+        ) buildableCrates;
 
         # For proc-macro / build-dep host platform builds
-        build = mkBuiltByPackageIdByPkgs cratePkgs.buildPackages;
+        build = mkBuiltByPackageIdByPkgs { isHost = true; } cratePkgs.buildPackages;
       };
     in
     self;
@@ -176,11 +201,20 @@ let
   #
   # When `includeDevDeps` is true, devDependencies are appended to the
   # dependency list. This is used by the test build path for workspace members.
+  #
+  # The `hostCtx` parameter carries build-context flags (isHost) from
+  # mkBuiltByPackageIdByPkgs. On the host path, stdlib crate deps are
+  # filtered out — the host rustc provides core/alloc via its sysroot.
   buildCrate =
+    hostCtx:
     self: cratePkgs: buildRustCrate: packageId:
     { includeDevDeps ? false }:
     let
+      isHost = hostCtx.isHost or false;
       crateInfo = resolved.crates.${packageId};
+
+      # Skip stdlib deps on the host path — the host rustc sysroot provides them.
+      skipStdlibDep = dep: isHost && hasStdlibCrates && isStdlibCrate dep.packageId;
 
       # Resolve a normal dependency to its derivation.
       # Proc-macro deps must be built for the build platform (they run at compile time).
@@ -199,8 +233,10 @@ let
       # into the build script which executes at build time, not on the target).
       buildDepDrv = dep: self.build.crates.${dep.packageId};
 
-      normalDeps = crateInfo.dependencies or [ ];
-      devDeps = if includeDevDeps then (crateInfo.devDependencies or [ ]) else [ ];
+      normalDeps = builtins.filter (dep: !skipStdlibDep dep) (crateInfo.dependencies or [ ]);
+      devDeps = if includeDevDeps
+        then builtins.filter (dep: !skipStdlibDep dep) (crateInfo.devDependencies or [ ])
+        else [ ];
 
       dependencies = map depDrv (normalDeps ++ devDeps);
       buildDependencies = map buildDepDrv (crateInfo.buildDependencies or [ ]);
@@ -304,7 +340,7 @@ let
       // optionalField "repository"
     );
 
-  builtCrates = mkBuiltByPackageIdByPkgs pkgs;
+  builtCrates = mkBuiltByPackageIdByPkgs {} pkgs;
 
   # --- Test support (dev dependencies) ---
   #
@@ -316,9 +352,10 @@ let
     (lib.attrValues (resolved.workspaceMembers or {}));
 
   mkTestBuiltByPkgs =
+    { isHost ? false }:
     cratePkgs:
     let
-      normalBuilt = mkBuiltByPackageIdByPkgs cratePkgs;
+      normalBuilt = mkBuiltByPackageIdByPkgs { inherit isHost; } cratePkgs;
 
       buildRustCrate =
         let
@@ -327,6 +364,12 @@ let
         base.override { defaultCrateOverrides = mergedOverrides; };
 
       workspaceMemberIds = lib.attrValues (resolved.workspaceMembers or {});
+
+      buildableCrates =
+        if isHost && hasStdlibCrates then
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+        else
+          resolved.crates;
 
       self = {
         crates = lib.mapAttrs (
@@ -338,20 +381,20 @@ let
           in
           if isWorkspaceMember && hasDevDepsForCrate then
             # Rebuild workspace members with dev deps included
-            buildCrate self cratePkgs buildRustCrate packageId { includeDevDeps = true; }
+            buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId { includeDevDeps = true; }
           else if isWorkspaceMember then
             # Workspace member without dev deps — still rebuild to link against
             # siblings that may have different dep sets
-            buildCrate self cratePkgs buildRustCrate packageId {}
+            buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId {}
           else
             normalBuilt.crates.${packageId}
-        ) resolved.crates;
-        build = mkTestBuiltByPkgs cratePkgs.buildPackages;
+        ) buildableCrates;
+        build = mkTestBuiltByPkgs { isHost = true; } cratePkgs.buildPackages;
       };
     in
     self;
 
-  testCrates = if hasDevDeps then mkTestBuiltByPkgs pkgs else builtCrates;
+  testCrates = if hasDevDeps then mkTestBuiltByPkgs {} pkgs else builtCrates;
 
   # --- Clippy support ---
   #
@@ -389,9 +432,10 @@ let
   # Non-workspace crates resolve to the exact same Nix store paths — no
   # redundant compilation.
   mkClippyBuiltByPkgs =
+    { isHost ? false }:
     cratePkgs:
     let
-      normalBuilt = mkBuiltByPackageIdByPkgs cratePkgs;
+      normalBuilt = mkBuiltByPackageIdByPkgs { inherit isHost; } cratePkgs;
 
       # Normal buildRustCrate for dependencies (fully cached)
       normalBuildRustCrate =
@@ -406,22 +450,28 @@ let
 
       workspaceMemberIds = lib.attrValues (resolved.workspaceMembers or {});
 
+      buildableCrates =
+        if isHost && hasStdlibCrates then
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+        else
+          resolved.crates;
+
       self = {
         crates = lib.mapAttrs (
           packageId: _:
           if lib.elem packageId workspaceMemberIds then
-            buildCrate self cratePkgs clippyBuildRustCrate packageId {}
+            buildCrate { inherit isHost; } self cratePkgs clippyBuildRustCrate packageId {}
           else
             normalBuilt.crates.${packageId}
-        ) resolved.crates;
+        ) buildableCrates;
         # Build-platform crates use clippy for workspace members too,
         # so build scripts see the same rlib metadata as the lib phase.
-        build = mkClippyBuiltByPkgs cratePkgs.buildPackages;
+        build = mkClippyBuiltByPkgs { isHost = true; } cratePkgs.buildPackages;
       };
     in
     self;
 
-  clippyCrates = mkClippyBuiltByPkgs pkgs;
+  clippyCrates = mkClippyBuiltByPkgs {} pkgs;
 
 in
 assert _stalenessCheck;
