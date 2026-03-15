@@ -41,6 +41,20 @@ pub struct NixCrate {
     pub sha256: Option<String>,
     pub source: Option<NixSource>,
     pub features: Vec<String>,
+    /// Host-platform features for cross-compilation builds.
+    ///
+    /// When a crate appears on both host and target platforms with different
+    /// feature sets (e.g., `indexmap` with `std` on host but not on a no_std
+    /// target), this field carries the host features. The primary `features`
+    /// field carries the target features.
+    ///
+    /// The Nix consumer uses this when building crates for the host platform
+    /// (build scripts, proc-macros) via `self.build`.
+    ///
+    /// Only populated when host and target features differ. When absent,
+    /// `features` applies to both platforms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_features: Option<Vec<String>>,
     pub dependencies: Vec<NixDep>,
     pub build_dependencies: Vec<NixDep>,
     /// Dev-only dependencies (only populated for workspace members when --include-dev is used).

@@ -22,6 +22,14 @@ pub struct Unit {
     pub mode: UnitMode,
     pub features: Vec<String>,
     pub dependencies: Vec<UnitDep>,
+    /// Compilation platform: `None` = host (build machine),
+    /// `Some(triple)` = cross-compilation target.
+    ///
+    /// In cross builds (`--target`), crates appear on both platforms with
+    /// potentially different features. Build scripts and proc-macros run on
+    /// host (None), while the main crate graph targets the cross platform.
+    #[serde(default)]
+    pub platform: Option<String>,
 }
 
 /// The compilation mode of a unit.

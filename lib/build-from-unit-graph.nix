@@ -273,7 +273,13 @@ let
           ${field} = crateInfo.${field};
         };
 
-      features = crateInfo.features or [ ];
+      # For cross builds, host and target can have different features.
+      # When isHost, prefer hostFeatures (if present) over target features.
+      features =
+        if isHost then
+          crateInfo.hostFeatures or crateInfo.features or [ ]
+        else
+          crateInfo.features or [ ];
 
       # Warn about -sys crates with `links` that have no override configured.
       linksValue = crateInfo.links or null;

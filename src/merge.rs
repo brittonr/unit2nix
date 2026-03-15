@@ -134,7 +134,7 @@ fn build_nix_crate(
 
     let (crate_name, version) = parse_pkg_id(pkg_id)?;
 
-    let features = collect_features(units);
+    let (features, host_features) = collect_platform_features(units);
     let proc_macro = primary.target.has_proc_macro();
     let dependencies = collect_dependencies(units, ctx.unit_graph, &ctx.unit_pkg_ids, pkg_id);
     let build_dependencies = collect_build_dependencies(build_script_unit, &ctx.unit_pkg_ids);
@@ -207,6 +207,7 @@ fn build_nix_crate(
         sha256,
         source,
         features,
+        host_features,
         dependencies,
         build_dependencies,
         dev_dependencies: vec![],
@@ -463,6 +464,53 @@ fn collect_features(units: &[(usize, &Unit)]) -> Vec<String> {
     features.into_iter().collect()
 }
 
+/// Collect features split by platform for cross-compilation.
+///
+/// In cross builds (`--target`), the same crate can appear on both the host
+/// (build scripts, proc-macros) and target platforms with different feature
+/// sets. For example, `indexmap` might have `["default", "std"]` on the host
+/// but `[]` on a no_std kernel target.
+///
+/// Returns `(target_features, host_features_override)`:
+/// - `target_features`: features for the target platform (primary)
+/// - `host_features_override`: `Some(features)` when host features differ
+///   from target features, `None` when they're the same or no cross build
+///
+/// For native builds (no `--target`), all units have `platform: None` (host),
+/// so this returns the merged features with no override — backward compatible.
+fn collect_platform_features(units: &[(usize, &Unit)]) -> (Vec<String>, Option<Vec<String>>) {
+    let target_units: Vec<(usize, &Unit)> = units
+        .iter()
+        .filter(|(_, u)| u.platform.is_some())
+        .copied()
+        .collect();
+
+    let host_units: Vec<(usize, &Unit)> = units
+        .iter()
+        .filter(|(_, u)| u.platform.is_none())
+        .copied()
+        .collect();
+
+    if target_units.is_empty() {
+        // Native build or host-only crate: all units are host, no split needed
+        (collect_features(units), None)
+    } else {
+        let target_features = collect_features(&target_units);
+        let host_features = if host_units.is_empty() {
+            // Target-only crate (e.g., stdlib crate): no host override
+            None
+        } else {
+            let hf = collect_features(&host_units);
+            if hf == target_features {
+                None
+            } else {
+                Some(hf)
+            }
+        };
+        (target_features, host_features)
+    }
+}
+
 /// Collect deduplicated normal dependencies from all buildable units.
 ///
 /// Unions deps across the primary lib/proc-macro unit and all bin units,
@@ -696,6 +744,17 @@ mod tests {
         features: Vec<&str>,
         deps: Vec<(usize, &str)>,
     ) -> Unit {
+        make_unit_with_platform(pkg_id, kind, mode, features, deps, None)
+    }
+
+    fn make_unit_with_platform(
+        pkg_id: &str,
+        kind: Vec<CrateKind>,
+        mode: UnitMode,
+        features: Vec<&str>,
+        deps: Vec<(usize, &str)>,
+        platform: Option<&str>,
+    ) -> Unit {
         Unit {
             pkg_id: pkg_id.to_string(),
             target: UnitTarget {
@@ -714,6 +773,7 @@ mod tests {
                     extern_crate_name: name.to_string(),
                 })
                 .collect(),
+            platform: platform.map(str::to_string),
         }
     }
 
