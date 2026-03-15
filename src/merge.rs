@@ -25,7 +25,10 @@ pub(crate) fn parse_pkg_id(pkg_id: &str) -> Result<(String, String)> {
 
     // path deps: fragment is just the version, name is in the path
     // e.g., path+file:///home/user/proj/crates/foo#0.1.0
-    let name = prefix
+    // git deps without @: git+https://host/repo?rev=abc#0.1.0
+    // Strip query params (?rev=, ?branch=) before extracting the name.
+    let url_path = prefix.split('?').next().unwrap_or(prefix);
+    let name = url_path
         .rsplit('/')
         .next()
         .filter(|s| !s.is_empty())
