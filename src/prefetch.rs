@@ -46,10 +46,15 @@ pub fn apply_crate_hashes(plan: &mut NixBuildPlan, manifest_path: &Path) -> Resu
 
     // Index hashes by (url, rev) for fast lookup.
     // Multiple crates from the same repo share the same hash.
+    // Also index by url alone for entries without ?rev= in the key.
     let mut by_url_rev: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut by_url_only: BTreeMap<String, String> = BTreeMap::new();
     for (key, hash) in &hashes {
         if let Some((url, rev)) = parse_crate_hash_key(key) {
-            by_url_rev.entry((url, rev)).or_insert_with(|| hash.clone());
+            match rev {
+                Some(r) => { by_url_rev.entry((url, r)).or_insert_with(|| hash.clone()); }
+                None => { by_url_only.entry(url).or_insert_with(|| hash.clone()); }
+            }
         }
     }
 
@@ -62,7 +67,9 @@ pub fn apply_crate_hashes(plan: &mut NixBuildPlan, manifest_path: &Path) -> Resu
             ..
         }) = &mut crate_info.source
         {
-            if let Some(hash) = by_url_rev.get(&(url.clone(), rev.clone())) {
+            let hash = by_url_rev.get(&(url.clone(), rev.clone()))
+                .or_else(|| by_url_only.get(url.as_str()));
+            if let Some(hash) = hash {
                 *sha256 = Some(hash.clone());
                 applied += 1;
             }
@@ -76,28 +83,27 @@ pub fn apply_crate_hashes(plan: &mut NixBuildPlan, manifest_path: &Path) -> Resu
     Ok(())
 }
 
-/// Parse a crate-hashes.json key into (url, rev).
+/// Parse a crate-hashes.json key into (url, optional rev).
 ///
 /// Key formats:
 ///   `https://example.com/repo.git?rev=abc123#crate@1.0.0`
 ///   `https://example.com/repo.git#crate@1.0.0` (no rev in URL)
-fn parse_crate_hash_key(key: &str) -> Option<(String, String)> {
+fn parse_crate_hash_key(key: &str) -> Option<(String, Option<String>)> {
     // Split on '#' — left side is URL (possibly with ?rev=), right is crate info
     let url_part = key.split('#').next()?;
 
     // Extract URL base and rev from query params
-    let (base_url, rev) = if let Some(query_start) = url_part.find('?') {
+    if let Some(query_start) = url_part.find('?') {
         let base = &url_part[..query_start];
         let query = &url_part[query_start + 1..];
         let rev = query
             .split('&')
-            .find_map(|param| param.strip_prefix("rev="))?;
-        (base.to_string(), rev.to_string())
+            .find_map(|param| param.strip_prefix("rev="));
+        Some((base.to_string(), rev.map(String::from)))
     } else {
-        return None; // No rev in URL — can't match
-    };
-
-    Some((base_url, rev))
+        // No rev in URL — still usable, will match by URL alone
+        Some((url_part.to_string(), None))
+    }
 }
 
 /// Run `nix-prefetch-git` to get the SHA256 of a git checkout.
@@ -197,7 +203,7 @@ mod tests {
         let key = "https://git.snix.dev/snix/snix.git?rev=180bfc4ce41a#nix-compat@0.1.0";
         let (url, rev) = parse_crate_hash_key(key).unwrap();
         assert_eq!(url, "https://git.snix.dev/snix/snix.git");
-        assert_eq!(rev, "180bfc4ce41a");
+        assert_eq!(rev, Some("180bfc4ce41a".to_string()));
     }
 
     #[test]
@@ -205,13 +211,15 @@ mod tests {
         let key = "https://git.snix.dev/snix/snix.git?rev=180bfc4ce41ad25016aae2e3eb4e7af8c3d185ac#nix-compat@0.1.0";
         let (url, rev) = parse_crate_hash_key(key).unwrap();
         assert_eq!(url, "https://git.snix.dev/snix/snix.git");
-        assert_eq!(rev, "180bfc4ce41ad25016aae2e3eb4e7af8c3d185ac");
+        assert_eq!(rev, Some("180bfc4ce41ad25016aae2e3eb4e7af8c3d185ac".to_string()));
     }
 
     #[test]
-    fn parse_key_no_rev_returns_none() {
+    fn parse_key_no_rev_returns_url_only() {
         let key = "https://github.com/n0-computer/iroh-experiments#h3-iroh@0.1.0";
-        assert!(parse_crate_hash_key(key).is_none());
+        let (url, rev) = parse_crate_hash_key(key).unwrap();
+        assert_eq!(url, "https://github.com/n0-computer/iroh-experiments");
+        assert_eq!(rev, None);
     }
 
     #[test]
@@ -219,6 +227,6 @@ mod tests {
         let key = "https://github.com/s2-streamstore/mad-turmoil?rev=ef75169#mad-turmoil@0.2.0";
         let (url, rev) = parse_crate_hash_key(key).unwrap();
         assert_eq!(url, "https://github.com/s2-streamstore/mad-turmoil");
-        assert_eq!(rev, "ef75169");
+        assert_eq!(rev, Some("ef75169".to_string()));
     }
 }
