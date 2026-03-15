@@ -25,7 +25,16 @@ in
 if sourceType == "local" || sourceType == null then
   let
     relPath = if source == null then "." else source.path or ".";
-    rawSrc = if relPath == "." then src else src + "/${relPath}";
+    isAbsolute = builtins.substring 0 1 relPath == "/";
+    # Absolute paths (e.g. /nix/store/... from patched Cargo.toml path deps)
+    # are used directly. Relative paths are resolved against the workspace src.
+    rawSrc =
+      if relPath == "." then
+        src
+      else if isAbsolute then
+        /. + relPath
+      else
+        src + "/${relPath}";
   in
   pkgs.lib.cleanSourceWith {
     src = rawSrc;
