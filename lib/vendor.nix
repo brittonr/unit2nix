@@ -136,11 +136,10 @@ let
         if parsed.fragment != null then parsed.fragment
         else parsed.rev or (builtins.throw "unit2nix: git dep '${representativePkg.name}' has no rev in source URL");
 
-      # Fetch git dep source without .git directory. auto.nix initialises
-      # bare repos from these plain checkouts inside the (non-FOD) IFD
-      # derivation, so fakeGit can serve them to cargo.
-      # Using leaveDotGit = true would create a FOD whose output references
-      # bash (via .git/hooks shebangs), which Nix rejects.
+      # Fetch git dep source WITH .git directory so auto.nix can populate
+      # cargo's CARGO_HOME/git/ cache via initGitReposScript + fakeGit.
+      # postFetch strips .git/hooks to avoid FOD output references to
+      # nix store bash paths (which Nix would reject as impure).
       src =
         if sha256 != null then
           pkgs.fetchgit {
@@ -148,14 +147,16 @@ let
             inherit (parsed) url;
             inherit rev;
             fetchSubmodules = true;
+            leaveDotGit = true;
+            postFetch = "find $out -name hooks -path '*/.git/*' -exec rm -rf {} + 2>/dev/null || true";
           }
         else
           builtins.throw ''
             unit2nix: git dependency "${representativePkg.name}" from ${parsed.url} at ${rev}
             requires a SHA256 hash in crate-hashes.json for auto mode.
 
-            Step 1 — get the hash:
-              nix-prefetch-git --url ${parsed.url} --rev ${rev} --fetch-submodules | jq -r .sha256
+            Step 1 — get the hash (note: --leave-dotGit matches fetchgit leaveDotGit):
+              nix-prefetch-git --url ${parsed.url} --rev ${rev} --fetch-submodules --leave-dotGit | jq -r .sha256
 
             Step 2 — add it to crate-hashes.json in your workspace root:
               {
