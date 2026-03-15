@@ -80,6 +80,15 @@ pub enum NixSource {
     },
     /// A local path dependency within the workspace.
     Local { path: String },
+    /// A Rust standard library crate built from source via `-Z build-std`.
+    ///
+    /// These crates (core, alloc, compiler_builtins, etc.) live in the Rust
+    /// toolchain's `lib/rustlib/src/rust/library/` directory. The Nix consumer
+    /// resolves them from a `rustSrcPath` parameter.
+    Stdlib {
+        /// Crate subdirectory within the stdlib source tree (e.g. "alloc", "core").
+        path: String,
+    },
     /// A git dependency.
     Git {
         url: String,

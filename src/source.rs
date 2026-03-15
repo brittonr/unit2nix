@@ -165,9 +165,44 @@ pub fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
             sub_dir: None,
             sha256: None,
         })
+    } else if let Some(stdlib_path) = detect_stdlib_source(pkg_id) {
+        Some(NixSource::Stdlib { path: stdlib_path })
     } else {
         // path+ or unknown — local
         None
+    }
+}
+
+/// Detect if a `path+file:///...` package ID points to the Rust stdlib source.
+///
+/// When `-Z build-std` is used, crates like `core`, `alloc`, and
+/// `compiler_builtins` appear in the unit graph with pkg_ids like:
+/// `path+file:///nix/store/.../rustlib/src/rust/library/alloc#1.92.0`
+///
+/// These are NOT workspace-local crates — they live in the toolchain. We detect
+/// them by the `rustlib/src/rust/library/` path segment and extract the crate's
+/// subdirectory (e.g. "alloc", "core").
+///
+/// `compiler_builtins` lives under `library/../vendor/compiler_builtins` or
+/// may be pulled from the registry. The `rustlib/src/rust` prefix is the
+/// reliable signal.
+#[must_use]
+fn detect_stdlib_source(pkg_id: &str) -> Option<String> {
+    // Strip the path+ prefix and fragment
+    let path_part = pkg_id.strip_prefix("path+file://")?;
+    let path_part = path_part.split('#').next()?;
+
+    // Look for the rustlib/src/rust/ marker
+    let marker = "rustlib/src/rust/";
+    let idx = path_part.find(marker)?;
+    let after_marker = &path_part[idx + marker.len()..];
+
+    // The remaining path is relative to the rust source root
+    // e.g. "library/alloc" or "vendor/compiler_builtins"
+    if after_marker.is_empty() {
+        None
+    } else {
+        Some(after_marker.to_string())
     }
 }
 
@@ -333,5 +368,63 @@ mod tests {
             "git+https://github.com/example/repo.git#my-crate@0.5.0",
         );
         assert!(source.is_none(), "should return None when rev cannot be determined");
+    }
+
+    #[test]
+    fn infer_stdlib_alloc() {
+        let source = infer_source_from_pkg_id(
+            "path+file:///nix/store/abc123-rust-1.92.0/lib/rustlib/src/rust/library/alloc#1.92.0",
+        );
+        match source {
+            Some(NixSource::Stdlib { path }) => assert_eq!(path, "library/alloc"),
+            other => panic!("expected Stdlib, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_stdlib_core() {
+        let source = infer_source_from_pkg_id(
+            "path+file:///nix/store/abc123-rust-1.92.0/lib/rustlib/src/rust/library/core#1.92.0",
+        );
+        match source {
+            Some(NixSource::Stdlib { path }) => assert_eq!(path, "library/core"),
+            other => panic!("expected Stdlib, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_stdlib_compiler_builtins() {
+        let source = infer_source_from_pkg_id(
+            "path+file:///nix/store/abc123-rust-1.92.0/lib/rustlib/src/rust/vendor/compiler_builtins#0.1.139",
+        );
+        match source {
+            Some(NixSource::Stdlib { path }) => assert_eq!(path, "vendor/compiler_builtins"),
+            other => panic!("expected Stdlib, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_local_not_stdlib() {
+        // A regular path+ dep should NOT be detected as stdlib
+        let source = infer_source_from_pkg_id(
+            "path+file:///home/user/project/crates/my-crate#0.1.0",
+        );
+        assert!(source.is_none(), "regular path dep should return None (local), not Stdlib");
+    }
+
+    #[test]
+    fn detect_stdlib_source_basic() {
+        assert_eq!(
+            detect_stdlib_source("path+file:///nix/store/abc/lib/rustlib/src/rust/library/alloc#1.92.0"),
+            Some("library/alloc".to_string()),
+        );
+    }
+
+    #[test]
+    fn detect_stdlib_source_not_stdlib() {
+        assert_eq!(
+            detect_stdlib_source("path+file:///home/user/project#0.1.0"),
+            None,
+        );
     }
 }

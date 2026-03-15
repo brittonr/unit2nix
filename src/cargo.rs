@@ -60,7 +60,15 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
 }
 
 /// Append common CLI flags (features, target, bin, package, workspace) to an args vector.
-fn append_common_args<'a>(args: &mut Vec<&'a str>, cli: &'a Cli) {
+///
+/// The `owned_args` vec holds dynamically-formatted flag strings whose
+/// `&str` borrows are pushed into `args`. The caller must keep `owned_args`
+/// alive as long as `args` is used.
+fn append_common_args<'a>(
+    args: &mut Vec<&'a str>,
+    cli: &'a Cli,
+    owned_args: &'a mut Vec<String>,
+) {
     if cli.workspace {
         args.push("--workspace");
     }
@@ -82,6 +90,15 @@ fn append_common_args<'a>(args: &mut Vec<&'a str>, cli: &'a Cli) {
     if let Some(target) = cli.target.as_deref() {
         args.extend_from_slice(&["--target", target]);
     }
+    if let Some(build_std) = cli.build_std.as_deref() {
+        owned_args.push(format!("-Zbuild-std={build_std}"));
+    }
+    if let Some(features) = cli.build_std_features.as_deref() {
+        owned_args.push(format!("-Zbuild-std-features={features}"));
+    }
+    for s in owned_args.iter() {
+        args.push(s);
+    }
 }
 
 /// Run `cargo build --unit-graph` and parse the result.
@@ -89,6 +106,7 @@ fn append_common_args<'a>(args: &mut Vec<&'a str>, cli: &'a Cli) {
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid unit graph JSON.
 pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
+    let mut owned_args = Vec::new();
     let mut args: Vec<&str> = vec![
         "build",
         "--unit-graph",
@@ -98,7 +116,7 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     if !cli.no_locked {
         args.push("--locked");
     }
-    append_common_args(&mut args, cli);
+    append_common_args(&mut args, cli, &mut owned_args);
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo build --unit-graph")?;
     serde_json::from_slice(&stdout).context("failed to parse unit graph JSON")
@@ -112,6 +130,7 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid unit graph JSON.
 pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
+    let mut owned_args = Vec::new();
     let mut args: Vec<&str> = vec![
         "test",
         "--unit-graph",
@@ -122,7 +141,7 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
     if !cli.no_locked {
         args.push("--locked");
     }
-    append_common_args(&mut args, cli);
+    append_common_args(&mut args, cli, &mut owned_args);
 
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo test --unit-graph")?;
     serde_json::from_slice(&stdout).context("failed to parse test unit graph JSON")

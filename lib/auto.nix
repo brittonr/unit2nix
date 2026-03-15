@@ -64,6 +64,14 @@
   # been stripped from the manifest but their transitive deps remain in
   # Cargo.lock.
   noLocked ? false,
+  # Build standard library from source (e.g. "core,alloc" for no_std targets).
+  # Passes --build-std to unit2nix, which passes -Z build-std to cargo.
+  buildStd ? null,
+  # Features for -Z build-std-features (e.g. "compiler-builtins-mem").
+  buildStdFeatures ? null,
+  # Path to Rust stdlib source for build-std crates.
+  # Required when buildStd is set. Typically "${rustToolchain}/lib/rustlib/src/rust".
+  rustSrcPath ? null,
 }:
 
 let
@@ -229,12 +237,14 @@ let
       ${lib.optionalString noDefaultFeatures "--no-default-features"} \
       ${lib.optionalString includeDev "--include-dev"} \
       ${lib.optionalString noLocked "--no-locked"} \
-      ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"}
+      ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"} \
+      ${lib.optionalString (buildStd != null) "--build-std ${lib.escapeShellArg buildStd}"} \
+      ${lib.optionalString (buildStdFeatures != null) "--build-std-features ${lib.escapeShellArg buildStdFeatures}"}
   '';
 
 in
 import ./build-from-unit-graph.nix {
-  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs members;
+  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs members rustSrcPath;
   src = workspaceSrc;
   resolvedJson = generatedPlan;
   skipStalenessCheck = true;

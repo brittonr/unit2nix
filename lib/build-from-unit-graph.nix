@@ -42,6 +42,10 @@
   # Required when buildRustCrateForPkgs uses a custom toolchain (e.g. from
   # rust-overlay) since the sysroot and clippy-driver must match the compiler.
   rustToolchain ? null,
+  # Optional: path to Rust stdlib source for `-Z build-std` crates.
+  # Required when the build plan contains stdlib crates (core, alloc, etc.).
+  # Typically: "${rustToolchain}/lib/rustlib/src/rust"
+  rustSrcPath ? null,
   # Optional: filter which workspace members are exposed.
   # When set, only listed member names appear in workspaceMembers,
   # allWorkspaceMembers, test, and clippy outputs.
@@ -127,7 +131,7 @@ let
     else
       (resolved.workspaceMembers or {});
 
-  fetchSource = import ./fetch-source.nix { inherit pkgs src; };
+  fetchSource = import ./fetch-source.nix { inherit pkgs src rustSrcPath; };
 
   # Built-in crate overrides from unit2nix (ring, tikv-jemalloc-sys, etc.)
   crateOverridesLib = import ./crate-overrides.nix { inherit pkgs; };

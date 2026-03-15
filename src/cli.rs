@@ -107,6 +107,25 @@ pub struct Cli {
     /// deps) and the lockfile contains entries that no longer match.
     #[arg(long)]
     pub no_locked: bool,
+
+    /// Build standard library crates from source (`-Z build-std`).
+    ///
+    /// Passes `-Z build-std=<CRATES>` to cargo's unit graph resolution.
+    /// Required for `no_std` targets (kernels, embedded) where the pre-compiled
+    /// sysroot doesn't exist. Common values: `core,alloc`, `core,alloc,std`.
+    ///
+    /// The stdlib crates appear as separate units in the build plan and are
+    /// built individually by `buildRustCrate` on the Nix side, so they're
+    /// cached across rebuilds just like registry dependencies.
+    #[arg(long)]
+    pub build_std: Option<String>,
+
+    /// Features for `-Z build-std-features`.
+    ///
+    /// Only used when `--build-std` is set. Common value:
+    /// `compiler-builtins-mem` (provides memcpy/memset for `no_std` targets).
+    #[arg(long)]
+    pub build_std_features: Option<String>,
 }
 
 impl Cli {

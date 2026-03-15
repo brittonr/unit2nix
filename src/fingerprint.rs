@@ -43,7 +43,7 @@ pub fn compute_inputs_hash(cli: &Cli) -> Result<String> {
         format!(
             "features={:?}\nall_features={}\nno_default_features={}\n\
              target={:?}\npackage={:?}\nbin={:?}\ninclude_dev={}\nmembers={:?}\n\
-             workspace={}\n",
+             workspace={}\nbuild_std={:?}\nbuild_std_features={:?}\n",
             cli.features,
             cli.all_features,
             cli.no_default_features,
@@ -53,6 +53,8 @@ pub fn compute_inputs_hash(cli: &Cli) -> Result<String> {
             cli.include_dev,
             cli.members,
             cli.workspace,
+            cli.build_std,
+            cli.build_std_features,
         )
         .as_bytes(),
     );
@@ -152,6 +154,8 @@ mod tests {
             force: false,
             workspace: false,
             no_locked: false,
+            build_std: None,
+            build_std_features: None,
         }
     }
 

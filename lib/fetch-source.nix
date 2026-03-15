@@ -6,9 +6,16 @@
 # Local sources are filtered to exclude target/, .git/, and editor temp files.
 # crates-io sources use fetchurl with SHA256 from Cargo.lock.
 # Git sources use pkgs.fetchgit with a prefetched SHA256 (pure evaluation).
+# Stdlib sources resolve from rustSrcPath (the toolchain's library source).
 # Falls back to builtins.fetchGit if no SHA256 is available (requires --impure).
 
-{ pkgs, src }:
+{
+  pkgs,
+  src,
+  # Path to the Rust toolchain's stdlib source (e.g. "${rustToolchain}/lib/rustlib/src/rust").
+  # Required when the build plan contains stdlib crates (from --build-std).
+  rustSrcPath ? null,
+}:
 
 crateInfo:
 let
@@ -56,6 +63,22 @@ else if sourceType == "registry" then
       });
     Registry index: ${source.index or "unknown"}
   ''
+
+else if sourceType == "stdlib" then
+  let
+    relPath = source.path or (builtins.throw "stdlib source missing 'path' field for ${crateInfo.crateName}");
+  in
+  if rustSrcPath == null then
+    builtins.throw ''
+      unit2nix: crate ${crateInfo.crateName}-${crateInfo.version} is a stdlib crate (from -Z build-std)
+      but no rustSrcPath was provided. Pass rustSrcPath to buildFromUnitGraph:
+        buildFromUnitGraph {
+          rustSrcPath = "''${rustToolchain}/lib/rustlib/src/rust";
+          ...
+        };
+    ''
+  else
+    rustSrcPath + "/${relPath}"
 
 else if sourceType == "git" then
   let
