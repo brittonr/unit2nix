@@ -173,22 +173,45 @@ pub fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
     let total = to_prefetch.len();
     eprintln!("Prefetching {total} git source(s)...");
 
+    let mut failed = 0u32;
     for (idx, ((url, rev), pkg_ids)) in to_prefetch.iter().enumerate() {
         let short_rev = if rev.len() > 12 { &rev[..12] } else { rev };
         eprintln!("  [{}/{}] {} @ {}", idx + 1, total, url, short_rev);
 
-        let sha256 = prefetch_git(url, rev)?;
-
-        // Apply the hash to all crates from this repo
-        for pkg_id in pkg_ids {
-            let crate_info = plan
-                .crates
-                .get_mut(pkg_id)
-                .ok_or_else(|| anyhow::anyhow!("internal error: pkg_id {pkg_id} missing from build plan during prefetch"))?;
-            if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut crate_info.source {
-                *hash = Some(sha256.clone());
+        match prefetch_git(url, rev) {
+            Ok(sha256) => {
+                // Apply the hash to all crates from this repo
+                for pkg_id in pkg_ids {
+                    let crate_info = plan
+                        .crates
+                        .get_mut(pkg_id)
+                        .ok_or_else(|| anyhow::anyhow!("internal error: pkg_id {pkg_id} missing from build plan during prefetch"))?;
+                    if let Some(NixSource::Git { sha256: ref mut hash, .. }) = &mut crate_info.source {
+                        *hash = Some(sha256.clone());
+                    }
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                let names: Vec<&str> = pkg_ids.iter()
+                    .filter_map(|id| plan.crates.get(id).map(|c| c.crate_name.as_str()))
+                    .collect();
+                eprintln!(
+                    "  ⚠ prefetch failed for {} ({}): {:#}\n    \
+                     The Nix build will require --impure (builtins.fetchGit fallback).\n    \
+                     To fix: push the commit to the remote, then regenerate the build plan.",
+                    names.join(", "), short_rev, e
+                );
             }
         }
+    }
+
+    if failed > 0 {
+        eprintln!(
+            "\n  {failed} git source(s) could not be prefetched.\n  \
+             The build plan was written, but `nix build` will need --impure unless\n  \
+             you push the missing commits and regenerate with `nix run .#update-plan`."
+        );
     }
 
     Ok(())
