@@ -1,11 +1,14 @@
 //! Input fingerprinting for incremental plan generation.
 //!
 //! Computes a SHA256 hash of everything that affects the build plan output:
-//! unit2nix version, CLI flags, Cargo.lock, and all Cargo.toml files in the
-//! workspace. When the fingerprint matches the stored value in an existing
-//! build plan, regeneration is skipped.
+//! unit2nix version, CLI flags, Cargo.lock, all Cargo.toml files in the
+//! workspace, and git HEADs of out-of-tree path dependencies. When the
+//! fingerprint matches the stored value in an existing build plan,
+//! regeneration is skipped.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
@@ -22,6 +25,7 @@ const SKIP_DIRS: &[&str] = &["target", ".git", "node_modules"];
 /// - CLI flags that affect dependency resolution
 /// - Cargo.lock content (exact dependency versions)
 /// - All Cargo.toml files under the workspace root (features, deps, targets)
+/// - Git HEAD of every out-of-tree path dependency's repo
 ///
 /// The fingerprint is deterministic: same inputs always produce the same hash.
 ///
@@ -86,6 +90,21 @@ pub fn compute_inputs_hash(cli: &Cli) -> Result<String> {
         }
     }
 
+    // Git HEAD of out-of-tree path dependencies.
+    //
+    // When a Cargo.toml has `path = "../sibling-repo/crates/foo"`, changes in
+    // that repo don't touch Cargo.lock or any workspace file. Without this,
+    // the fingerprint stays stale and `unit2nix` skips regeneration even though
+    // the resolved git rev would change.
+    let external_heads = collect_out_of_tree_git_heads(&toml_paths, workspace_dir);
+    for (repo_root, head) in &external_heads {
+        hasher.update(b"ext-git-head:");
+        hasher.update(repo_root.as_bytes());
+        hasher.update(b":");
+        hasher.update(head.as_bytes());
+        hasher.update(b"\n");
+    }
+
     Ok(format!("{:x}", hasher.finalize()))
 }
 
@@ -128,6 +147,107 @@ fn collect_cargo_tomls(dir: &Path, out: &mut Vec<PathBuf>) {
         }
         collect_cargo_tomls(&entry.path(), out);
     }
+}
+
+/// Extract path dependency values from a Cargo.toml's dependency tables.
+///
+/// Parses the TOML and collects every `path = "..."` value from
+/// `[dependencies]`, `[dev-dependencies]`, and `[build-dependencies]`.
+fn extract_path_deps(toml_content: &str) -> Vec<String> {
+    let Ok(doc) = toml_content.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+
+    let dep_tables = [
+        "dependencies",
+        "dev-dependencies",
+        "build-dependencies",
+    ];
+
+    let mut paths = Vec::new();
+    for table_name in &dep_tables {
+        if let Some(toml::Value::Table(deps)) = doc.get(*table_name) {
+            for (_name, spec) in deps {
+                if let Some(path) = spec.get("path").and_then(|v| v.as_str()) {
+                    paths.push(path.to_string());
+                }
+            }
+        }
+    }
+    paths
+}
+
+/// For each out-of-tree path dependency, resolve its git repo root and HEAD.
+///
+/// Returns a sorted, deduplicated list of `(repo_root, HEAD_rev)` pairs.
+/// Repos that aren't git-controlled or have no commits are silently skipped.
+fn collect_out_of_tree_git_heads(
+    toml_paths: &[PathBuf],
+    workspace_dir: &Path,
+) -> Vec<(String, String)> {
+    let ws_canon = workspace_dir.canonicalize().unwrap_or_else(|_| workspace_dir.to_path_buf());
+
+    // Deduplicate by canonical repo root so we only call git once per repo.
+    let mut seen_repos: BTreeSet<String> = BTreeSet::new();
+    let mut result: Vec<(String, String)> = Vec::new();
+
+    for toml_path in toml_paths {
+        let manifest_dir = toml_path.parent().unwrap_or(Path::new("."));
+        let content = match std::fs::read_to_string(toml_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for rel_path in extract_path_deps(&content) {
+            let dep_dir = manifest_dir.join(&rel_path);
+            let dep_canon = match dep_dir.canonicalize() {
+                Ok(p) => p,
+                Err(_) => continue, // path doesn't exist on disk
+            };
+
+            // Skip if it's inside the workspace — already covered by Cargo.toml hashing.
+            if dep_canon.starts_with(&ws_canon) {
+                continue;
+            }
+
+            // Find the git repo root for this path.
+            let repo_root = match git_repo_root(&dep_canon) {
+                Some(r) => r,
+                None => continue, // not in a git repo
+            };
+
+            if seen_repos.contains(&repo_root) {
+                continue;
+            }
+            seen_repos.insert(repo_root.clone());
+
+            if let Some(head) = git_head(&repo_root) {
+                result.push((repo_root, head));
+            }
+        }
+    }
+
+    result
+}
+
+/// Get the git repository root directory for a path.
+fn git_repo_root(dir: &Path) -> Option<String> {
+    Command::new("git")
+        .args(["-C", &dir.to_string_lossy(), "rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// Get the HEAD commit of a git repository.
+fn git_head(repo_root: &str) -> Option<String> {
+    Command::new("git")
+        .args(["-C", repo_root, "rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
 #[cfg(test)]
@@ -267,5 +387,63 @@ mod tests {
                 .any(|c| c.as_os_str() == "target")),
             "should not descend into target/"
         );
+    }
+
+    #[test]
+    fn extract_path_deps_finds_deps() {
+        let toml = r#"
+[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = { path = "../foo" }
+bar = "1.0"
+baz = { version = "2", features = ["serde"] }
+qux = { path = "crates/qux" }
+
+[dev-dependencies]
+testlib = { path = "../testlib" }
+
+[build-dependencies]
+codegen = { path = "../codegen", version = "0.1" }
+"#;
+        let mut paths = extract_path_deps(toml);
+        paths.sort();
+        assert_eq!(paths, vec![
+            "../codegen",
+            "../foo",
+            "../testlib",
+            "crates/qux",
+        ]);
+    }
+
+    #[test]
+    fn extract_path_deps_empty_manifest() {
+        let toml = r#"
+[package]
+name = "test"
+version = "0.1.0"
+"#;
+        assert!(extract_path_deps(toml).is_empty());
+    }
+
+    #[test]
+    fn extract_path_deps_no_path_deps() {
+        let toml = r#"
+[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tokio = "1"
+"#;
+        assert!(extract_path_deps(toml).is_empty());
+    }
+
+    #[test]
+    fn extract_path_deps_invalid_toml() {
+        assert!(extract_path_deps("not valid toml {{{").is_empty());
     }
 }
