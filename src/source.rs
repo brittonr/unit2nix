@@ -55,12 +55,32 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             let manifest = std::path::Path::new(manifest_path);
             let crate_dir = manifest.parent().unwrap_or_else(|| std::path::Path::new("."));
             let ws = std::path::Path::new(workspace_root);
-            let rel = crate_dir.strip_prefix(ws).map_or_else(
-                |_| crate_dir.to_string_lossy().into_owned(),
-                |p| p.to_string_lossy().into_owned(),
-            );
-            let path = if rel.is_empty() { ".".to_string() } else { rel };
-            Ok(Some(NixSource::Local { path }))
+            match crate_dir.strip_prefix(ws) {
+                Ok(rel) => {
+                    let path = if rel.as_os_str().is_empty() {
+                        ".".to_string()
+                    } else {
+                        rel.to_string_lossy().into_owned()
+                    };
+                    Ok(Some(NixSource::Local { path }))
+                }
+                Err(_) => {
+                    // Out-of-tree path dependency — try to resolve as a git source
+                    // so the Nix build can fetch it without access to the local filesystem.
+                    match resolve_out_of_tree_git(crate_dir) {
+                        Some(git_source) => Ok(Some(git_source)),
+                        None => {
+                            let abs = crate_dir.to_string_lossy().into_owned();
+                            eprintln!(
+                                "warning: out-of-tree path dependency at {abs} is not in a git repo.\n  \
+                                 The Nix build will fail unless you provide this source via externalSources.\n  \
+                                 Consider converting this to a git dependency in Cargo.toml."
+                            );
+                            Ok(Some(NixSource::Local { path: abs }))
+                        }
+                    }
+                }
+            }
         }
         Some(s) if s.starts_with("registry+") => {
             // Extract registry URL for non-crates.io registries
@@ -88,6 +108,86 @@ pub fn parse_source(source: Option<&str>, manifest_path: &str, workspace_root: &
             )
         }
     }
+}
+
+/// Resolve an out-of-tree path dependency as a git source.
+///
+/// When a path dependency points outside the workspace (e.g. `path = "../sibling-repo/crates/foo"`),
+/// this function checks if the path is inside a git repository and extracts the remote URL,
+/// current commit, and subdirectory. This lets the Nix build fetch the source via `fetchgit`
+/// instead of relying on an absolute filesystem path that won't exist in the Nix sandbox.
+///
+/// Returns `None` if the path is not inside a git repo or the repo has no remote.
+#[must_use]
+fn resolve_out_of_tree_git(crate_dir: &std::path::Path) -> Option<NixSource> {
+    use std::process::Command;
+
+    // Find the git repo root
+    let git_root = Command::new("git")
+        .args(["-C", &crate_dir.to_string_lossy(), "rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+
+    // Get the current HEAD commit
+    let rev = Command::new("git")
+        .args(["-C", &git_root, "rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+
+    // Get the remote URL (try origin first, fall back to first remote)
+    let url = Command::new("git")
+        .args(["-C", &git_root, "remote", "get-url", "origin"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())?;
+
+    // Normalize SSH URLs to HTTPS for nix-prefetch-git compatibility
+    let url = normalize_git_url(&url);
+
+    // Compute subdirectory within the repo
+    let git_root_path = std::path::Path::new(&git_root);
+    let sub_dir = crate_dir.strip_prefix(git_root_path).ok().and_then(|rel| {
+        let s = rel.to_string_lossy().into_owned();
+        if s.is_empty() { None } else { Some(s) }
+    });
+
+    let crate_name = crate_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    eprintln!(
+        "  → resolved out-of-tree path dep '{crate_name}' as git: {url} @ {}{}",
+        &rev[..rev.len().min(12)],
+        sub_dir.as_ref().map_or(String::new(), |d| format!(" (subdir: {d})"))
+    );
+
+    Some(NixSource::Git { url, rev, sub_dir, sha256: None })
+}
+
+/// Normalize a git remote URL for use with `nix-prefetch-git`.
+///
+/// Converts SSH URLs (`git@github.com:user/repo.git`) to HTTPS
+/// (`https://github.com/user/repo.git`) since `nix-prefetch-git`
+/// can't use SSH keys inside the Nix sandbox.
+fn normalize_git_url(url: &str) -> String {
+    // git@github.com:user/repo.git → https://github.com/user/repo.git
+    if let Some(rest) = url.strip_prefix("git@") {
+        if let Some((host, path)) = rest.split_once(':') {
+            return format!("https://{host}/{path}");
+        }
+    }
+    // ssh://git@github.com/user/repo.git → https://github.com/user/repo.git
+    if let Some(rest) = url.strip_prefix("ssh://git@") {
+        return format!("https://{rest}");
+    }
+    url.to_string()
 }
 
 /// Compute the subdirectory of a crate within a git checkout.
@@ -425,6 +525,40 @@ mod tests {
         assert_eq!(
             detect_stdlib_source("path+file:///home/user/project#0.1.0"),
             None,
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // normalize_git_url tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn normalize_ssh_git_url() {
+        assert_eq!(
+            normalize_git_url("git@github.com:user/repo.git"),
+            "https://github.com/user/repo.git"
+        );
+    }
+
+    #[test]
+    fn normalize_ssh_protocol_url() {
+        assert_eq!(
+            normalize_git_url("ssh://git@github.com/user/repo.git"),
+            "https://github.com/user/repo.git"
+        );
+    }
+
+    #[test]
+    fn normalize_https_url_unchanged() {
+        let url = "https://github.com/user/repo.git";
+        assert_eq!(normalize_git_url(url), url);
+    }
+
+    #[test]
+    fn normalize_ssh_gitlab_url() {
+        assert_eq!(
+            normalize_git_url("git@gitlab.com:org/project.git"),
+            "https://gitlab.com/org/project.git"
         );
     }
 }

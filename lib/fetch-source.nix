@@ -15,6 +15,9 @@
   # Path to the Rust toolchain's stdlib source (e.g. "${rustToolchain}/lib/rustlib/src/rust").
   # Required when the build plan contains stdlib crates (from --build-std).
   rustSrcPath ? null,
+  # Map of absolute filesystem paths to Nix store paths for out-of-tree path deps.
+  # See build-from-unit-graph.nix externalSources for documentation.
+  externalSources ? {},
 }:
 
 crateInfo:
@@ -26,13 +29,35 @@ if sourceType == "local" || sourceType == null then
   let
     relPath = if source == null then "." else source.path or ".";
     isAbsolute = builtins.substring 0 1 relPath == "/";
-    # Absolute paths (e.g. /nix/store/... from patched Cargo.toml path deps)
-    # are used directly. Relative paths are resolved against the workspace src.
+    hasExternalOverride = isAbsolute && externalSources ? ${relPath};
     rawSrc =
       if relPath == "." then
         src
+      else if hasExternalOverride then
+        externalSources.${relPath}
       else if isAbsolute then
-        /. + relPath
+        builtins.throw ''
+          unit2nix: local path dependency has absolute path outside the workspace:
+            ${relPath}
+
+          This path is not available inside the Nix sandbox. Fix options:
+
+          1. Regenerate the build plan — the CLI now auto-resolves out-of-tree
+             path deps as git sources when the directory is a git repo:
+               nix run .#update-plan
+
+          2. Provide the source via externalSources in your flake.nix:
+               ws = import "''${unit2nix}/lib/build-from-unit-graph.nix" {
+                 inherit pkgs;
+                 src = ./.;
+                 resolvedJson = ./build-plan.json;
+                 externalSources."${relPath}" = some-flake-input + "/subdir";
+               };
+
+          3. Convert to a git dependency in Cargo.toml:
+               [dependencies]
+               ${crateInfo.crateName} = { git = "https://...", rev = "..." }
+        ''
       else
         src + "/${relPath}";
   in

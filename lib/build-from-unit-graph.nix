@@ -51,6 +51,20 @@
   # allWorkspaceMembers, test, and clippy outputs.
   # All crates remain in the build plan (Nix laziness means unused ones are never built).
   members ? null,
+  # Optional: provide sources for out-of-tree path dependencies.
+  #
+  # Maps absolute filesystem paths (as they appear in build-plan.json) to Nix
+  # store paths. Use this for path deps that live outside the workspace and
+  # weren't auto-resolved to git sources by the CLI.
+  #
+  # Example:
+  #   externalSources."/home/user/sibling-repo/crates/foo" = sibling-repo + "/crates/foo";
+  #
+  # Flake inputs are the typical source:
+  #   inputs.sibling-repo = { url = "github:user/sibling-repo"; flake = false; };
+  #   externalSources."/home/user/sibling-repo/crates/foo" =
+  #     "${sibling-repo}/crates/foo";
+  externalSources ? {},
 }:
 
 let
@@ -131,7 +145,7 @@ let
     else
       (resolved.workspaceMembers or {});
 
-  fetchSource = import ./fetch-source.nix { inherit pkgs src rustSrcPath; };
+  fetchSource = import ./fetch-source.nix { inherit pkgs src rustSrcPath externalSources; };
 
   # Stdlib crate detection for build-std support.
   # When a build plan contains stdlib crates (core, alloc, compiler_builtins),
