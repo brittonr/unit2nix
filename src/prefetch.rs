@@ -116,7 +116,7 @@ fn parse_crate_hash_key(key: &str) -> Option<(String, Option<String>)> {
 /// produces unparseable output.
 pub fn prefetch_git(url: &str, rev: &str) -> Result<String> {
     let output = match Command::new("nix-prefetch-git")
-        .args(["--url", url, "--rev", rev, "--fetch-submodules", "--quiet"])
+        .args(["--url", url, "--rev", rev, "--fetch-submodules", "--leave-dotGit", "--quiet"])
         .output()
     {
         Ok(o) => o,

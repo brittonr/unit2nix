@@ -101,6 +101,11 @@ else if sourceType == "git" then
           rev = source.rev;
           inherit sha256;
           fetchSubmodules = true;
+          # Match vendor.nix: hashes in crate-hashes.json are computed with
+          # --leave-dotGit so both vendor (build plan sandbox) and source
+          # fetching use the same fetchgit options and SHA256.
+          leaveDotGit = true;
+          postFetch = "find $out -name hooks -path '*/.git/*' -exec rm -rf {} + 2>/dev/null || true";
         }
       else
         builtins.trace
