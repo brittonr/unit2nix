@@ -23,6 +23,7 @@ let
     "compiler_builtins" = true;
     "rustc-std-workspace-core" = true;
     "rustc-std-workspace-alloc" = true;
+    "wasm-bindgen-shared" = true;
   };
 
   # Prefix patterns for links values that are Rust-internal.
@@ -78,9 +79,12 @@ in
     };
 
     # zstd-sys: Zstandard compression. Common in CLI tools.
+    # The "bindgen" feature is ON by default, so the build script runs
+    # bindgen to generate Rust FFI bindings, which needs libclang.
     zstd-sys = attrs: {
       nativeBuildInputs = [ pkgs.pkg-config ];
       buildInputs = [ pkgs.zstd ];
+      LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
     };
 
     # bzip2-sys: bzip2 compression.
@@ -91,6 +95,19 @@ in
 
     # lzma-sys: LZMA/XZ compression.
     lzma-sys = attrs: {
+      nativeBuildInputs = [ pkgs.pkg-config ];
+      buildInputs = [ pkgs.xz ];
+    };
+
+    # clang-sys: libclang FFI used by bindgen.
+    # Needs LIBCLANG_PATH so its build.rs can locate the shared library.
+    clang-sys = attrs: {
+      LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+    };
+
+    # liblzma-sys: XZ/LZMA compression (distinct from lzma-sys).
+    # Uses cc + pkg-config to find or vendor liblzma.
+    liblzma-sys = attrs: {
       nativeBuildInputs = [ pkgs.pkg-config ];
       buildInputs = [ pkgs.xz ];
     };
