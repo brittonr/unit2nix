@@ -34,6 +34,10 @@
   # Skip the Cargo.lock staleness check (default: false).
   # Set to true when src filtering strips Cargo.lock or for other edge cases.
   skipStalenessCheck ? false,
+  # Skip the cross-compilation target check (default: false).
+  # Set to true when intentionally cross-compiling with a custom
+  # buildRustCrateForPkgs that handles the host/target split.
+  skipTargetCheck ? false,
   # Extra arguments passed to clippy-driver (e.g. ["-D" "warnings"]).
   # Used by the .clippy output — has no effect on normal builds.
   clippyArgs ? [],
@@ -112,11 +116,14 @@ let
   planTarget = resolved.target or null;
   hostConfig = pkgs.stdenv.hostPlatform.config;
   _targetCheck =
-    if planTarget != null && planTarget != hostConfig then
+    if skipTargetCheck then
+      true
+    else if planTarget != null && planTarget != hostConfig then
       builtins.trace
         ("unit2nix: WARNING — build plan target '${planTarget}' differs from "
           + "pkgs host platform '${hostConfig}'. "
-          + "For cross-compilation, use: pkgs.pkgsCross.<platform> or matching --target.")
+          + "For cross-compilation, use: pkgs.pkgsCross.<platform> or matching --target."
+          + " Set skipTargetCheck = true to suppress this warning.")
         true
     else
       true;
