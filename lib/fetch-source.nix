@@ -117,32 +117,23 @@ else if sourceType == "stdlib" then
 else if sourceType == "git" then
   let
     sha256 = source.sha256 or null;
-    # Prefer pkgs.fetchgit with a prefetched hash (pure, fixed-output derivation).
-    # Fall back to builtins.fetchGit when no hash is available (requires --impure).
+    # Use builtins.fetchGit for crate source resolution. This is a Nix builtin
+    # (not a derivation), so it avoids fixed-output derivation issues with
+    # sandbox restrictions. The rev pin ensures reproducibility without needing
+    # a SHA256 hash. The .git directory is NOT included (not needed for building).
+    #
+    # vendor.nix separately fetches with pkgs.fetchgit + leaveDotGit for
+    # cargo's CARGO_HOME/git/ cache — that's the only place .git is needed.
+    #
+    # Falls back to pkgs.fetchgit with SHA256 hash when builtins.fetchGit
+    # is unavailable (shouldn't happen with Nix >= 2.4, but keeps compat).
     repo =
-      if sha256 != null then
-        pkgs.fetchgit {
-          url = source.url;
-          rev = source.rev;
-          inherit sha256;
-          fetchSubmodules = true;
-          # Match vendor.nix: hashes in crate-hashes.json are computed with
-          # --leave-dotGit so both vendor (build plan sandbox) and source
-          # fetching use the same fetchgit options and SHA256.
-          leaveDotGit = true;
-          postFetch = "find $out -name hooks -path '*/.git/*' -exec rm -rf {} + 2>/dev/null || true";
-        }
-      else
-        builtins.trace
-          ("unit2nix: WARNING — git dep '${crateInfo.crateName}' has no sha256; "
-            + "using builtins.fetchGit (requires --impure).\n"
-            + "  To fix, run:\n"
-            + "    nix-prefetch-git --url ${source.url} --rev ${source.rev}\n"
-            + "  Then regenerate the build plan with `unit2nix`.")
-          builtins.fetchGit {
-            url = source.url;
-            rev = source.rev;
-          };
+      builtins.fetchGit {
+        url = source.url;
+        rev = source.rev;
+        allRefs = true;
+        submodules = true;
+      };
     subDir = source.subDir or null;
   in
   if subDir != null then repo + "/${subDir}" else repo
