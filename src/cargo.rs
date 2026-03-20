@@ -149,14 +149,21 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 
 /// Run `cargo metadata` and parse the result.
 ///
+/// Feature flags, package filters, and workspace mode are forwarded so that
+/// metadata resolves the same dependency set as the unit graph. Without this,
+/// optional deps (gated behind features) appear in the unit graph but not in
+/// metadata — causing `make_relative` to fail and emit absolute vendor paths
+/// for `build` and `libPath` fields.
+///
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid metadata JSON.
 pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
-    let mut args = vec!["metadata", "--format-version=1"];
+    let mut owned_args = Vec::new();
+    let mut args: Vec<&str> = vec!["metadata", "--format-version=1"];
     if !cli.no_locked {
         args.push("--locked");
     }
-    let args = args;
+    append_common_args(&mut args, cli, &mut owned_args);
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo metadata")?;
     serde_json::from_slice(&stdout).context("failed to parse cargo metadata JSON")
 }
