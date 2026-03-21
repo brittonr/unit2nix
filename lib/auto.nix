@@ -247,7 +247,9 @@ let
 
     cd source
 
-    unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
+    _plan="$TMPDIR/build-plan.json"
+
+    unit2nix --manifest-path ./${manifestRelPath} -o "$_plan" --no-check \
       ${lib.optionalString workspace "--workspace"} \
       ${lib.optionalString (package != null) "-p ${lib.escapeShellArg package}"} \
       ${lib.optionalString (bin != null) "--bin ${lib.escapeShellArg bin}"} \
@@ -262,19 +264,18 @@ let
 
     # Rewrite external source paths in the build plan.
     # Cargo records resolved-but-not-canonicalized paths (e.g. /build/subwayrat/...)
-    # rather than following symlinks to /nix/store/... paths. Replace the /build/
-    # paths with the actual store paths so fetch-source.nix can use them directly.
+    # rather than following symlinks to /nix/store/... paths. sed -i can't
+    # create temp files in /nix/store/, so we write to $TMPDIR first.
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (relPath: storePath:
       let
-        # Resolve relative path against the workspace dir in the build layout.
-        # IFD copies src to /build/source/, workspace root is either
-        # /build/source/ or /build/source/${workspaceDir}/.
         wsPrefix = if workspaceDir != null then "/build/source/${workspaceDir}" else "/build/source";
       in ''
         _abs="$(cd ${wsPrefix} && realpath -m "${relPath}")"
-        sed -i "s|$_abs|${storePath}|g" "$out"
+        sed -i "s|$_abs|${storePath}|g" "$_plan"
       ''
     ) externalSources)}
+
+    cp "$_plan" "$out"
   '';
 
 in
