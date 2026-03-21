@@ -38,6 +38,7 @@
               buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
               defaultCrateOverrides ? null,
               extraCrateOverrides ? {},
+              externalSources ? {},
               skipStalenessCheck ? false,
               clippyArgs ? [],
               members ? null,
@@ -51,6 +52,7 @@
                 buildRustCrateForPkgs
                 defaultCrateOverrides
                 extraCrateOverrides
+                externalSources
                 skipStalenessCheck
                 clippyArgs
                 members
@@ -92,6 +94,10 @@
               bin ? null,
               # Don't pass --locked to cargo.
               noLocked ? false,
+              # Sources for out-of-tree path dependencies.
+              # Maps relative paths (as in Cargo.toml) to Nix store paths.
+              # Example: externalSources = { "../sibling" = sibling-input; };
+              externalSources ? {},
             }:
             import ./lib/auto.nix {
               inherit
@@ -112,6 +118,7 @@
                 allFeatures
                 noDefaultFeatures
                 includeDev
+                externalSources
                 ;
               unit2nix = self.packages.${system}.unit2nix;
             };
