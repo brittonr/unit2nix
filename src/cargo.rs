@@ -149,21 +149,28 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 
 /// Run `cargo metadata` and parse the result.
 ///
-/// Feature flags, package filters, and workspace mode are forwarded so that
-/// metadata resolves the same dependency set as the unit graph. Without this,
-/// optional deps (gated behind features) appear in the unit graph but not in
-/// metadata — causing `make_relative` to fail and emit absolute vendor paths
-/// for `build` and `libPath` fields.
+/// Only feature flags are forwarded — `cargo metadata` doesn't accept
+/// `--workspace`, `--package`, `--bin`, `--target`, or `-Z` flags.
+/// It doesn't need them: metadata always resolves the full workspace
+/// with all members. Feature flags matter because they affect which
+/// optional dependencies get resolved (and thus appear in `packages[]`).
 ///
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid metadata JSON.
 pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
-    let mut owned_args = Vec::new();
     let mut args: Vec<&str> = vec!["metadata", "--format-version=1"];
     if !cli.no_locked {
         args.push("--locked");
     }
-    append_common_args(&mut args, cli, &mut owned_args);
+    if let Some(features) = cli.features.as_deref() {
+        args.extend_from_slice(&["--features", features]);
+    }
+    if cli.all_features {
+        args.push("--all-features");
+    }
+    if cli.no_default_features {
+        args.push("--no-default-features");
+    }
     let stdout = run_cargo(&args, &cli.manifest_path, "cargo metadata")?;
     serde_json::from_slice(&stdout).context("failed to parse cargo metadata JSON")
 }
