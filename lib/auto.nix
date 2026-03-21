@@ -270,7 +270,8 @@ let
       let
         wsPrefix = if workspaceDir != null then "/build/source/${workspaceDir}" else "/build/source";
       in ''
-        _abs="$(cd ${wsPrefix} && realpath -m "${relPath}")"
+        _abs="$(realpath -m -s "${wsPrefix}/${relPath}")"
+        echo "Rewriting external path: $_abs -> ${storePath}"
         sed -i "s|$_abs|${storePath}|g" "$_plan"
       ''
     ) externalSources)}
