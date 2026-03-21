@@ -29,12 +29,18 @@ if sourceType == "local" || sourceType == null then
   let
     relPath = if source == null then "." else source.path or ".";
     isAbsolute = builtins.substring 0 1 relPath == "/";
+    isNixStorePath = pkgs.lib.hasPrefix "/nix/store/" relPath;
     hasExternalOverride = isAbsolute && externalSources ? ${relPath};
     rawSrc =
       if relPath == "." then
         src
       else if hasExternalOverride then
         externalSources.${relPath}
+      # Nix store paths are already available in the sandbox — use directly.
+      # This happens when auto.nix symlinks external sources into the IFD
+      # build dir and cargo canonicalizes through them to store paths.
+      else if isNixStorePath then
+        /. + relPath
       else if isAbsolute then
         builtins.throw ''
           unit2nix: local path dependency has absolute path outside the workspace:

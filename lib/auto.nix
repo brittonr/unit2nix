@@ -72,6 +72,16 @@
   # Path to Rust stdlib source for build-std crates.
   # Required when buildStd is set. Typically "${rustToolchain}/lib/rustlib/src/rust".
   rustSrcPath ? null,
+  # Sources for out-of-tree path dependencies (sibling repos, monorepo crates).
+  #
+  # Maps **relative paths** (as they appear in Cargo.toml) to Nix store paths.
+  # During IFD, symlinks are created so cargo can resolve the paths; cargo
+  # canonicalizes through symlinks, recording /nix/store/... in the build plan.
+  # fetch-source.nix then recognises those store paths and uses them directly.
+  #
+  # Example (workspace has `rat-tui = { path = "../sibling/crates/rat-tui" }`):
+  #   externalSources = { "../sibling" = sibling-flake-input; };
+  externalSources ? {},
 }:
 
 let
@@ -226,6 +236,17 @@ let
     # Copy source tree (preserving directory structure for relative path deps)
     cp -r ${src} source
     chmod -R u+w source
+
+    # Create symlinks for external path deps so cargo can resolve them.
+    # Cargo canonicalises through symlinks, so the build plan records
+    # /nix/store/... paths which fetch-source.nix uses directly.
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (relPath: storePath: ''
+      pushd source${lib.optionalString (workspaceDir != null) "/${workspaceDir}"}
+      mkdir -p "$(dirname "${relPath}")"
+      ln -sfn "${storePath}" "${relPath}"
+      popd
+    '') externalSources)}
+
     cd source
 
     unit2nix --manifest-path ./${manifestRelPath} -o "$out" --no-check \
