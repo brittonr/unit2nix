@@ -238,8 +238,6 @@ let
     chmod -R u+w source
 
     # Create symlinks for external path deps so cargo can resolve them.
-    # Cargo canonicalises through symlinks, so the build plan records
-    # /nix/store/... paths which fetch-source.nix uses directly.
     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (relPath: storePath: ''
       pushd source${lib.optionalString (workspaceDir != null) "/${workspaceDir}"}
       mkdir -p "$(dirname "${relPath}")"
@@ -261,6 +259,22 @@ let
       ${lib.optionalString (members != null) "--members ${lib.escapeShellArg (builtins.concatStringsSep "," members)}"} \
       ${lib.optionalString (buildStd != null) "--build-std ${lib.escapeShellArg buildStd}"} \
       ${lib.optionalString (buildStdFeatures != null) "--build-std-features ${lib.escapeShellArg buildStdFeatures}"}
+
+    # Rewrite external source paths in the build plan.
+    # Cargo records resolved-but-not-canonicalized paths (e.g. /build/subwayrat/...)
+    # rather than following symlinks to /nix/store/... paths. Replace the /build/
+    # paths with the actual store paths so fetch-source.nix can use them directly.
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (relPath: storePath:
+      let
+        # Resolve relative path against the workspace dir in the build layout.
+        # IFD copies src to /build/source/, workspace root is either
+        # /build/source/ or /build/source/${workspaceDir}/.
+        wsPrefix = if workspaceDir != null then "/build/source/${workspaceDir}" else "/build/source";
+      in ''
+        _abs="$(cd ${wsPrefix} && realpath -m "${relPath}")"
+        sed -i "s|$_abs|${storePath}|g" "$out"
+      ''
+    ) externalSources)}
   '';
 
 in
