@@ -378,6 +378,52 @@ let
     (pid: (resolved.crates.${pid}.devDependencies or []) != [])
     (lib.attrValues (resolved.workspaceMembers or {}));
 
+  # Build a test graph for a SINGLE workspace member.
+  #
+  # Only `targetPackageId` gets its devDependencies included. All other crates
+  # (including other workspace members) use normal builds. This avoids infinite
+  # recursion when dev-dep chains form cycles with regular deps:
+  #   e.g. aspen-dag [dev-dep] → aspen-testing-patchbay → aspen-cluster → aspen-dag
+  #
+  # `cargo test -p foo` works the same way: only foo gets dev-deps, transitive
+  # deps are compiled normally.
+  mkTestGraphForCrate =
+    { isHost ? false }:
+    cratePkgs:
+    targetPackageId:
+    let
+      normalBuilt = mkBuiltByPackageIdByPkgs { inherit isHost; } cratePkgs;
+
+      buildRustCrate =
+        let
+          base = buildRustCrateForPkgs cratePkgs;
+        in
+        base.override { defaultCrateOverrides = mergedOverrides; };
+
+      buildableCrates =
+        if isHost && hasStdlibCrates then
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+        else
+          resolved.crates;
+
+      self = {
+        crates = lib.mapAttrs (
+          packageId: _:
+          if packageId == targetPackageId then
+            # Only the target crate gets dev-deps
+            buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId { includeDevDeps = true; }
+          else
+            # All other crates use normal builds (no dev-deps)
+            normalBuilt.crates.${packageId}
+        ) buildableCrates;
+        build = mkTestGraphForCrate { isHost = true; } cratePkgs.buildPackages targetPackageId;
+      };
+    in
+    self;
+
+  # Legacy shared test graph (all workspace members get dev-deps simultaneously).
+  # Kept for backward compat with test.workspaceMembers — lazy evaluation means
+  # it only cycles if a problematic member is actually accessed.
   mkTestBuiltByPkgs =
     { isHost ? false }:
     cratePkgs:
@@ -559,14 +605,17 @@ assert _targetCheck;
     };
 
     # Run test binaries for workspace members.
-    # Uses .override { buildTests = true; } on the testCrates build (which already
-    # includes dev deps). Dependencies stay as normal lib builds (same store paths);
-    # only the workspace member itself is recompiled with `--test`.
+    # Each member gets its own test graph where only THAT crate has dev-deps.
+    # This avoids infinite recursion from dev-dep cycles (e.g. A [dev-dep]→ B → C → A).
+    # Dependencies stay as normal lib builds (same store paths); only the target
+    # crate itself is recompiled with `--test` and dev-deps.
     check = lib.mapAttrs (
       _name: packageId:
       let
-        # Rebuild this one crate with buildTests — deps remain normal .lib builds
-        testBinDrv = (testCrates.crates.${packageId}).override { buildTests = true; };
+        # Build a test graph specific to this crate — only it gets dev-deps
+        crateTestGraph = mkTestGraphForCrate {} pkgs packageId;
+        # Rebuild this one crate with buildTests
+        testBinDrv = (crateTestGraph.crates.${packageId}).override { buildTests = true; };
         crateName = resolved.crates.${packageId}.crateName;
       in
       pkgs.runCommand "test-${crateName}" {} ''
