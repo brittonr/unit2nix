@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "cycle-a",
+  "cycle-b",
+  "cycle-c",
+]
+resolver = "2"

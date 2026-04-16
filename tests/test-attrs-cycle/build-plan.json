@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "workspaceRoot": "/home/brittonr/git/unit2nix/tests/test-attrs-cycle",
+  "roots": [
+    "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-a#0.1.0",
+    "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-b#0.1.0",
+    "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-c#0.1.0"
+  ],
+  "workspaceMembers": {
+    "cycle-a": "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-a#0.1.0",
+    "cycle-b": "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-b#0.1.0",
+    "cycle-c": "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-c#0.1.0"
+  },
+  "cargoLockHash": "613dba4245197a48f684da5148efad71322f7d8bad13274dd00434b6a7e88340",
+  "inputsHash": "8312b8e118c83b13dd7a31f06b7f79c9e6faa5b0a38f52b004516b189763a489",
+  "crates": {
+    "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-a#0.1.0": {
+      "crateName": "cycle-a",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "cycle-a"
+      },
+      "features": [],
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [
+        {
+          "packageId": "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-b#0.1.0",
+          "externCrateName": "cycle_b"
+        }
+      ],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "libCrateTypes": [
+        "lib"
+      ],
+      "crateBin": [],
+      "links": null
+    },
+    "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-b#0.1.0": {
+      "crateName": "cycle-b",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "cycle-b"
+      },
+      "features": [],
+      "dependencies": [
+        {
+          "packageId": "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-c#0.1.0",
+          "externCrateName": "cycle_c"
+        }
+      ],
+      "buildDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "libCrateTypes": [
+        "lib"
+      ],
+      "crateBin": [],
+      "links": null
+    },
+    "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-c#0.1.0": {
+      "crateName": "cycle-c",
+      "version": "0.1.0",
+      "edition": "2021",
+      "sha256": null,
+      "source": {
+        "type": "local",
+        "path": "cycle-c"
+      },
+      "features": [],
+      "dependencies": [
+        {
+          "packageId": "path+file:///home/brittonr/git/unit2nix/tests/test-attrs-cycle/cycle-a#0.1.0",
+          "externCrateName": "cycle_a"
+        }
+      ],
+      "buildDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "libCrateTypes": [
+        "lib"
+      ],
+      "crateBin": [],
+      "links": null
+    }
+  }
+}

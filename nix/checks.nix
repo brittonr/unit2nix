@@ -15,6 +15,9 @@
   sample-run-tests = sampleWorkspace.test.check."sample-lib";
   sample-run-tests-bin = sampleWorkspace.test.check."sample-bin";
 
+  # Regression: public workspace test attrs stay cycle-safe with dev-dep cycles
+  test-attrs-cycle = import ../tests/test-attrs-cycle/build.nix { inherit pkgs; };
+
   # Members filter: build only sample-bin from 4-member workspace
   sample-members-filter =
     (buildFromUnitGraph {

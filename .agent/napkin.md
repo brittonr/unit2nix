@@ -14,6 +14,8 @@
 - Done: second cleanup pass — see session 2026-03-01 #2 below
 
 ## Patterns That Work
+- For follow-up bugs after an OpenSpec change is fully checked off but still unarchived, create a new change instead of reopening the completed one
+- Public Nix test attrs must all share the per-member test-graph model; fixing only `test.check` leaves recursion reachable through `test.workspaceMembers` and `test.allWorkspaceMembers`
 - `cargo test` runs 20 unit tests — all pure (no cargo invocation needed)
 - Tests cover: parse_pkg_id, parse_source variants, compute_git_subdir, cargo_lock_hash, git rev extraction
 - Nix checks: `nix flake check` runs sample workspace build + VM tests (Linux only)
@@ -23,7 +25,7 @@
 - `UnitTarget` convenience methods (`has_lib()`, `has_lib_like()`, etc.) are cleaner than free functions taking `&[String]`
 
 ## Patterns That Don't Work
-- (none yet)
+- `openspec/` is gitignored in this repo — `openspec archive` updates files on disk, but commits need `git add -f openspec/...`
 
 ## Session: 2026-03-01 Cleanup
 Changes made:

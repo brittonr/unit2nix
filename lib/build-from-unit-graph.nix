@@ -421,53 +421,13 @@ let
     in
     self;
 
-  # Legacy shared test graph (all workspace members get dev-deps simultaneously).
-  # Kept for backward compat with test.workspaceMembers — lazy evaluation means
-  # it only cycles if a problematic member is actually accessed.
-  mkTestBuiltByPkgs =
-    { isHost ? false }:
-    cratePkgs:
-    let
-      normalBuilt = mkBuiltByPackageIdByPkgs { inherit isHost; } cratePkgs;
+  # Public test attrs use a per-member graph so one workspace member's
+  # dev-dependency cycle cannot force unrelated members into the same fixpoint.
+  testGraphForPackageId =
+    packageId:
+    if hasDevDeps then mkTestGraphForCrate {} pkgs packageId else builtCrates;
 
-      buildRustCrate =
-        let
-          base = buildRustCrateForPkgs cratePkgs;
-        in
-        base.override { defaultCrateOverrides = mergedOverrides; };
-
-      workspaceMemberIds = lib.attrValues (resolved.workspaceMembers or {});
-
-      buildableCrates =
-        if isHost && hasStdlibCrates then
-          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
-        else
-          resolved.crates;
-
-      self = {
-        crates = lib.mapAttrs (
-          packageId: _:
-          let
-            isWorkspaceMember = lib.elem packageId workspaceMemberIds;
-            crateInfo = resolved.crates.${packageId};
-            hasDevDepsForCrate = (crateInfo.devDependencies or []) != [];
-          in
-          if isWorkspaceMember && hasDevDepsForCrate then
-            # Rebuild workspace members with dev deps included
-            buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId { includeDevDeps = true; }
-          else if isWorkspaceMember then
-            # Workspace member without dev deps — still rebuild to link against
-            # siblings that may have different dep sets
-            buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId {}
-          else
-            normalBuilt.crates.${packageId}
-        ) buildableCrates;
-        build = mkTestBuiltByPkgs { isHost = true; } cratePkgs.buildPackages;
-      };
-    in
-    self;
-
-  testCrates = if hasDevDeps then mkTestBuiltByPkgs {} pkgs else builtCrates;
+  testBuildForPackageId = packageId: (testGraphForPackageId packageId).crates.${packageId};
 
   # --- Clippy support ---
   #
@@ -554,7 +514,7 @@ assert _targetCheck;
   # Uses the explicit workspaceMembers map from the JSON (set by cargo metadata),
   # not a heuristic based on source type.
   # When `members` is set, only expose selected members.
-  # Internal crate graph (builtCrates, testCrates, clippyCrates) still contains all crates —
+  # Internal crate graph (builtCrates, clippyCrates) still contains all crates —
   # filtering only affects what's exposed in the output attrset.
   workspaceMembers = lib.mapAttrs (
     _name: packageId: {
@@ -586,36 +546,33 @@ assert _targetCheck;
     ) filteredWorkspaceMembers;
   };
 
-  # Test: workspace members built with dev-dependencies included.
-  # Only available when the build plan was generated with --include-dev.
-  # Non-workspace dependencies are reused from the normal build (same store paths).
+  # Test: workspace members built from per-member test graphs.
+  # Only the selected workspace member gets dev-dependencies; all other crates
+  # in its closure resolve through normal builds. This keeps public test attrs
+  # cycle-safe for workspaces whose dev-deps close a cycle through normal deps.
   test = {
     workspaceMembers = lib.mapAttrs (
       _name: packageId: {
         inherit packageId;
-        build = testCrates.crates.${packageId};
+        build = testBuildForPackageId packageId;
       }
     ) filteredWorkspaceMembers;
 
     allWorkspaceMembers = pkgs.symlinkJoin {
       name = "all-workspace-members-test";
       paths = lib.mapAttrsToList (
-        _name: packageId: testCrates.crates.${packageId}
+        _name: packageId: testBuildForPackageId packageId
       ) filteredWorkspaceMembers;
     };
 
     # Run test binaries for workspace members.
-    # Each member gets its own test graph where only THAT crate has dev-deps.
-    # This avoids infinite recursion from dev-dep cycles (e.g. A [dev-dep]→ B → C → A).
-    # Dependencies stay as normal lib builds (same store paths); only the target
-    # crate itself is recompiled with `--test` and dev-deps.
+    # test.check.<name> intentionally uses the same per-member graph as
+    # test.workspaceMembers.<name>.build, then recompiles that one crate with
+    # `--test` enabled to run its #[test] binaries.
     check = lib.mapAttrs (
       _name: packageId:
       let
-        # Build a test graph specific to this crate — only it gets dev-deps
-        crateTestGraph = mkTestGraphForCrate {} pkgs packageId;
-        # Rebuild this one crate with buildTests
-        testBinDrv = (crateTestGraph.crates.${packageId}).override { buildTests = true; };
+        testBinDrv = (testBuildForPackageId packageId).override { buildTests = true; };
         crateName = resolved.crates.${packageId}.crateName;
       in
       pkgs.runCommand "test-${crateName}" {} ''

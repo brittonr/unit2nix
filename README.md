@@ -115,7 +115,9 @@ Both `buildFromUnitGraph` and `buildFromUnitGraphAuto` return:
 | `workspaceMembers.<name>.build` | Built workspace member |
 | `rootCrate.build` | Root package (single-package projects) |
 | `allWorkspaceMembers` | `symlinkJoin` of all members |
-| `test.check.<name>` | `#[test]` runner (requires `--include-dev` or `--workspace`) |
+| `test.workspaceMembers.<name>.build` | Workspace member built from an isolated per-member test graph |
+| `test.allWorkspaceMembers` | `symlinkJoin` of per-member test builds |
+| `test.check.<name>` | `#[test]` runner built from the same per-member test graph (requires `--include-dev` or `--workspace`) |
 | `clippy.allWorkspaceMembers` | Clippy all members |
 | `builtCrates.crates.<pkgId>` | Every crate derivation by package ID |
 
@@ -162,6 +164,11 @@ For workspaces, use `--workspace` to capture dev-dependencies for **all** member
 cargo unit2nix --workspace
 nix build .#test.check.my-crate
 ```
+
+All public test attrs (`test.workspaceMembers`, `test.allWorkspaceMembers`, and
+`test.check`) use per-member test graphs. Only the selected member gets
+`devDependencies`, so a dev-dependency cycle in one workspace member does not
+poison unrelated members or the aggregate test attr.
 
 For single-crate projects, `--include-dev` is sufficient:
 
