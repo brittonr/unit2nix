@@ -10,6 +10,7 @@ result-*
 
 # pi agent runtime state (skills/prompts are tracked)
 .pi/prompt-history.jsonl
+.agent/review-metrics.jsonl
 
 # openspec working directory
 openspec/

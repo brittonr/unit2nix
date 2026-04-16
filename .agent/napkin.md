@@ -28,6 +28,7 @@
 ## Patterns That Don't Work
 - `openspec/` is gitignored in this repo — `openspec archive` updates files on disk, but commits need `git add -f openspec/...`
 - Archived delta specs can drift out of `openspec/specs/`; after archive cleanup, compare `openspec list --specs` against `openspec/changes/archive/*/specs/*/spec.md` and backfill missing main specs
+- Tracking `.agent/review-metrics.jsonl` in git creates constant status noise; keep `.agent/napkin.md` tracked but ignore review metrics as local session artifacts
 
 ## Session: 2026-03-01 Cleanup
 Changes made:
