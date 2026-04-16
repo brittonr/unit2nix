@@ -15,6 +15,7 @@
 
 ## Patterns That Work
 - For follow-up bugs after an OpenSpec change is fully checked off but still unarchived, create a new change instead of reopening the completed one
+- `openspec archive -y <change>` is safer than manual moves; it archives completed active changes and syncs their delta specs into `openspec/specs/`
 - Public Nix test attrs must all share the per-member test-graph model; fixing only `test.check` leaves recursion reachable through `test.workspaceMembers` and `test.allWorkspaceMembers`
 - `cargo test` runs 20 unit tests — all pure (no cargo invocation needed)
 - Tests cover: parse_pkg_id, parse_source variants, compute_git_subdir, cargo_lock_hash, git rev extraction
@@ -26,6 +27,7 @@
 
 ## Patterns That Don't Work
 - `openspec/` is gitignored in this repo — `openspec archive` updates files on disk, but commits need `git add -f openspec/...`
+- Archived delta specs can drift out of `openspec/specs/`; after archive cleanup, compare `openspec list --specs` against `openspec/changes/archive/*/specs/*/spec.md` and backfill missing main specs
 
 ## Session: 2026-03-01 Cleanup
 Changes made:
