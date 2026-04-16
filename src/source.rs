@@ -265,11 +265,9 @@ pub fn infer_source_from_pkg_id(pkg_id: &str) -> Option<NixSource> {
             sub_dir: None,
             sha256: None,
         })
-    } else if let Some(stdlib_path) = detect_stdlib_source(pkg_id) {
-        Some(NixSource::Stdlib { path: stdlib_path })
     } else {
-        // path+ or unknown — local
-        None
+        // path+ or unknown — local, unless it points into rust-src.
+        detect_stdlib_source(pkg_id).map(|stdlib_path| NixSource::Stdlib { path: stdlib_path })
     }
 }
 

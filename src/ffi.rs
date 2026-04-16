@@ -80,6 +80,8 @@ fn resolve_impl(input: &PluginInput) -> Result<NixBuildPlan, String> {
         force: false,
         workspace: input.workspace,
         no_locked: false,
+        build_std: None,
+        build_std_features: None,
     };
 
     let members_filter = cli.members_filter();

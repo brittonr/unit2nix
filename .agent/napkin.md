@@ -416,6 +416,16 @@ Lessons:
 - `CARGO_TARGET_DIR` is set to `~/.cargo-target` in the devshell, so `./target/debug/unit2nix` is stale — must use `~/.cargo-target/debug/unit2nix`
 - `--workspace` in `append_common_args` goes before `--features` etc. since it's a global flag, but cargo doesn't care about order
 
+## Session: 2026-04-16 — FFI CLI drift fix
+Changes made:
+- **Bug fix**: `src/ffi.rs` `Cli` initializer now sets `build_std: None` and `build_std_features: None`, matching new CLI fields so `--all-features` builds compile again
+- **Style**: `src/source.rs` stdlib fallback branch now uses `Option::map`, fixing `clippy::manual_map`
+- **Verification**: `TMPDIR=$PWD/.tmp nix develop -c cargo clippy --all-targets --all-features -- -D warnings` passes; `TMPDIR=$PWD/.tmp nix develop -c cargo test` passes (80 tests)
+
+Lessons:
+- When adding fields to `Cli`, update non-clap constructors too (`ffi.rs`, tests, helpers) or optional features can silently drift until `--all-features` validation
+- Repo-local `TMPDIR=$PWD/.tmp` avoids failures when global `/tmp` is full during `nix develop`
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix
