@@ -1,0 +1,392 @@
+{
+  "version": 1,
+  "target": null,
+  "workspaceMembers": {
+    "sample-bin": "path+file://<repo>/sample_workspace/sample-bin#0.1.0",
+    "sample-lib": "path+file://<repo>/sample_workspace/sample-lib#0.1.0"
+  },
+  "roots": [
+    "path+file://<repo>/sample_workspace/sample-bin#0.1.0",
+    "path+file://<repo>/sample_workspace/sample-lib#0.1.0"
+  ],
+  "crateCount": 15,
+  "crates": [
+    {
+      "crateName": "sample-bin",
+      "source": {
+        "type": "local",
+        "path": "sample-bin"
+      },
+      "features": [],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "sample_build_script",
+          "packageId": "path+file://<repo>/sample_workspace/sample-build-script#0.1.0"
+        },
+        {
+          "externCrateName": "sample_lib",
+          "packageId": "path+file://<repo>/sample_workspace/sample-lib#0.1.0"
+        },
+        {
+          "externCrateName": "sample_macro",
+          "packageId": "path+file://<repo>/sample_workspace/sample-macro#0.1.0"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [
+        {
+          "name": "sample-bin",
+          "path": "src/main.rs"
+        }
+      ],
+      "links": null
+    },
+    {
+      "crateName": "sample-build-script",
+      "source": {
+        "type": "local",
+        "path": "sample-build-script"
+      },
+      "features": [],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "sample-lib",
+      "source": {
+        "type": "local",
+        "path": "sample-lib"
+      },
+      "features": [
+        "default",
+        "serde"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "serde",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"
+        },
+        {
+          "externCrateName": "serde_json",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.149"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "sample-macro",
+      "source": {
+        "type": "local",
+        "path": "sample-macro"
+      },
+      "features": [],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": true,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "itoa",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "memchr",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "alloc",
+        "std"
+      ],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "proc-macro2",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "proc-macro"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "unicode_ident",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "quote",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "proc-macro"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "proc_macro2",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "serde",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "default",
+        "derive",
+        "serde_derive",
+        "std"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "serde_core",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.228"
+        },
+        {
+          "externCrateName": "serde_derive",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#serde_derive@1.0.228"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "serde_core",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "result",
+        "std"
+      ],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "serde_derive",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "default"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "proc_macro2",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106"
+        },
+        {
+          "externCrateName": "quote",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45"
+        },
+        {
+          "externCrateName": "syn",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#syn@2.0.117"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": true,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "serde_json",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "itoa",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.17"
+        },
+        {
+          "externCrateName": "memchr",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#memchr@2.8.0"
+        },
+        {
+          "externCrateName": "serde_core",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.228"
+        },
+        {
+          "externCrateName": "zmij",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#zmij@1.0.21"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "syn",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [
+        "clone-impls",
+        "derive",
+        "parsing",
+        "printing",
+        "proc-macro"
+      ],
+      "hostFeatures": null,
+      "dependencies": [
+        {
+          "externCrateName": "proc_macro2",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.106"
+        },
+        {
+          "externCrateName": "quote",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.45"
+        },
+        {
+          "externCrateName": "unicode_ident",
+          "packageId": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.24"
+        }
+      ],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "unicode-ident",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    },
+    {
+      "crateName": "zmij",
+      "source": {
+        "type": "crates-io"
+      },
+      "features": [],
+      "hostFeatures": null,
+      "dependencies": [],
+      "buildDependencies": [],
+      "devDependencies": [],
+      "procMacro": false,
+      "build": null,
+      "libPath": null,
+      "libName": null,
+      "crateBin": [],
+      "links": null
+    }
+  ]
+}

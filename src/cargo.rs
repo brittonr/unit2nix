@@ -60,45 +60,85 @@ pub fn run_cargo(args: &[&str], manifest_path: &Path, description: &str) -> Resu
 }
 
 /// Append common CLI flags (features, target, bin, package, workspace) to an args vector.
-///
-/// The `owned_args` vec holds dynamically-formatted flag strings whose
-/// `&str` borrows are pushed into `args`. The caller must keep `owned_args`
-/// alive as long as `args` is used.
-fn append_common_args<'a>(
-    args: &mut Vec<&'a str>,
-    cli: &'a Cli,
-    owned_args: &'a mut Vec<String>,
-) {
+fn append_common_args(args: &mut Vec<String>, cli: &Cli) {
     if cli.workspace {
-        args.push("--workspace");
+        args.push("--workspace".to_string());
     }
     if let Some(features) = cli.features.as_deref() {
-        args.extend_from_slice(&["--features", features]);
+        args.push("--features".to_string());
+        args.push(features.to_string());
     }
     if cli.all_features {
-        args.push("--all-features");
+        args.push("--all-features".to_string());
     }
     if cli.no_default_features {
-        args.push("--no-default-features");
+        args.push("--no-default-features".to_string());
     }
     if let Some(bin) = cli.bin.as_deref() {
-        args.extend_from_slice(&["--bin", bin]);
+        args.push("--bin".to_string());
+        args.push(bin.to_string());
     }
     if let Some(package) = cli.package.as_deref() {
-        args.extend_from_slice(&["--package", package]);
+        args.push("--package".to_string());
+        args.push(package.to_string());
     }
     if let Some(target) = cli.target.as_deref() {
-        args.extend_from_slice(&["--target", target]);
+        args.push("--target".to_string());
+        args.push(target.to_string());
     }
     if let Some(build_std) = cli.build_std.as_deref() {
-        owned_args.push(format!("-Zbuild-std={build_std}"));
+        args.push(format!("-Zbuild-std={build_std}"));
     }
     if let Some(features) = cli.build_std_features.as_deref() {
-        owned_args.push(format!("-Zbuild-std-features={features}"));
+        args.push(format!("-Zbuild-std-features={features}"));
     }
-    for s in owned_args.iter() {
-        args.push(s);
+}
+
+fn unit_graph_args(cli: &Cli) -> Vec<String> {
+    let mut args = vec![
+        "build".to_string(),
+        "--unit-graph".to_string(),
+        "-Z".to_string(),
+        "unstable-options".to_string(),
+    ];
+    if !cli.no_locked {
+        args.push("--locked".to_string());
     }
+    append_common_args(&mut args, cli);
+    args
+}
+
+fn test_unit_graph_args(cli: &Cli) -> Vec<String> {
+    let mut args = vec![
+        "test".to_string(),
+        "--unit-graph".to_string(),
+        "-Z".to_string(),
+        "unstable-options".to_string(),
+        "--no-run".to_string(),
+    ];
+    if !cli.no_locked {
+        args.push("--locked".to_string());
+    }
+    append_common_args(&mut args, cli);
+    args
+}
+
+fn cargo_metadata_args(cli: &Cli) -> Vec<String> {
+    let mut args = vec!["metadata".to_string(), "--format-version=1".to_string()];
+    if !cli.no_locked {
+        args.push("--locked".to_string());
+    }
+    if let Some(features) = cli.features.as_deref() {
+        args.push("--features".to_string());
+        args.push(features.to_string());
+    }
+    if cli.all_features {
+        args.push("--all-features".to_string());
+    }
+    if cli.no_default_features {
+        args.push("--no-default-features".to_string());
+    }
+    args
 }
 
 /// Run `cargo build --unit-graph` and parse the result.
@@ -106,19 +146,10 @@ fn append_common_args<'a>(
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid unit graph JSON.
 pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
-    let mut owned_args = Vec::new();
-    let mut args: Vec<&str> = vec![
-        "build",
-        "--unit-graph",
-        "-Z",
-        "unstable-options",
-    ];
-    if !cli.no_locked {
-        args.push("--locked");
-    }
-    append_common_args(&mut args, cli, &mut owned_args);
+    let args = unit_graph_args(cli);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let stdout = run_cargo(&args, &cli.manifest_path, "cargo build --unit-graph")?;
+    let stdout = run_cargo(&arg_refs, &cli.manifest_path, "cargo build --unit-graph")?;
     serde_json::from_slice(&stdout).context("failed to parse unit graph JSON")
 }
 
@@ -130,20 +161,10 @@ pub fn run_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid unit graph JSON.
 pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
-    let mut owned_args = Vec::new();
-    let mut args: Vec<&str> = vec![
-        "test",
-        "--unit-graph",
-        "-Z",
-        "unstable-options",
-        "--no-run",
-    ];
-    if !cli.no_locked {
-        args.push("--locked");
-    }
-    append_common_args(&mut args, cli, &mut owned_args);
+    let args = test_unit_graph_args(cli);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let stdout = run_cargo(&args, &cli.manifest_path, "cargo test --unit-graph")?;
+    let stdout = run_cargo(&arg_refs, &cli.manifest_path, "cargo test --unit-graph")?;
     serde_json::from_slice(&stdout).context("failed to parse test unit graph JSON")
 }
 
@@ -158,20 +179,9 @@ pub fn run_test_unit_graph(cli: &Cli) -> Result<UnitGraph> {
 /// # Errors
 /// Returns an error if cargo fails or the output is not valid metadata JSON.
 pub fn run_cargo_metadata(cli: &Cli) -> Result<CargoMetadata> {
-    let mut args: Vec<&str> = vec!["metadata", "--format-version=1"];
-    if !cli.no_locked {
-        args.push("--locked");
-    }
-    if let Some(features) = cli.features.as_deref() {
-        args.extend_from_slice(&["--features", features]);
-    }
-    if cli.all_features {
-        args.push("--all-features");
-    }
-    if cli.no_default_features {
-        args.push("--no-default-features");
-    }
-    let stdout = run_cargo(&args, &cli.manifest_path, "cargo metadata")?;
+    let args = cargo_metadata_args(cli);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let stdout = run_cargo(&arg_refs, &cli.manifest_path, "cargo metadata")?;
     serde_json::from_slice(&stdout).context("failed to parse cargo metadata JSON")
 }
 
@@ -203,8 +213,193 @@ pub fn read_cargo_lock(manifest_path: &Path) -> Result<(CargoLock, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::read_cargo_lock;
-    use std::path::Path;
+    use super::{cargo_metadata_args, read_cargo_lock, run_cargo, test_unit_graph_args, unit_graph_args};
+    use crate::cli::Cli;
+    use crate::test_support::env_lock;
+    use std::path::{Path, PathBuf};
+
+    fn write_fake_cargo(script_body: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fake-cargo");
+        std::fs::write(&path, format!("#!/usr/bin/env bash\nset -euo pipefail\n{script_body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        dir
+    }
+
+    fn with_fake_cargo<T>(script_body: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = write_fake_cargo(script_body);
+        let path = dir.path().join("fake-cargo");
+        let old = std::env::var_os("CARGO");
+        std::env::set_var("CARGO", &path);
+        let result = f();
+        match old {
+            Some(value) => std::env::set_var("CARGO", value),
+            None => std::env::remove_var("CARGO"),
+        }
+        result
+    }
+
+    fn make_cli() -> Cli {
+        Cli {
+            manifest_path: PathBuf::from("./Cargo.toml"),
+            features: None,
+            bin: None,
+            package: None,
+            all_features: false,
+            no_default_features: false,
+            target: None,
+            output: PathBuf::from("build-plan.json"),
+            stdout: false,
+            check_overrides: false,
+            include_dev: false,
+            members: None,
+            no_check: false,
+            json: false,
+            force: false,
+            workspace: false,
+            no_locked: false,
+            build_std: None,
+            build_std_features: None,
+        }
+    }
+
+    #[test]
+    fn unit_graph_args_include_common_flags() {
+        let mut cli = make_cli();
+        cli.workspace = true;
+        cli.features = Some("serde,cli".to_string());
+        cli.all_features = true;
+        cli.no_default_features = true;
+        cli.bin = Some("unit2nix".to_string());
+        cli.package = Some("unit2nix".to_string());
+        cli.target = Some("aarch64-unknown-linux-gnu".to_string());
+        cli.build_std = Some("core,alloc".to_string());
+        cli.build_std_features = Some("compiler-builtins-mem".to_string());
+
+        assert_eq!(
+            unit_graph_args(&cli),
+            vec![
+                "build",
+                "--unit-graph",
+                "-Z",
+                "unstable-options",
+                "--locked",
+                "--workspace",
+                "--features",
+                "serde,cli",
+                "--all-features",
+                "--no-default-features",
+                "--bin",
+                "unit2nix",
+                "--package",
+                "unit2nix",
+                "--target",
+                "aarch64-unknown-linux-gnu",
+                "-Zbuild-std=core,alloc",
+                "-Zbuild-std-features=compiler-builtins-mem",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn unit_graph_args_skip_locked_when_requested() {
+        let mut cli = make_cli();
+        cli.no_locked = true;
+
+        assert!(
+            !unit_graph_args(&cli).contains(&"--locked".to_string()),
+            "--locked should be omitted when --no-locked is set"
+        );
+    }
+
+    #[test]
+    fn test_unit_graph_args_include_no_run() {
+        let args = test_unit_graph_args(&make_cli());
+        assert_eq!(args[0], "test");
+        assert!(args.contains(&"--unit-graph".to_string()));
+        assert!(args.contains(&"--no-run".to_string()));
+        assert!(args.contains(&"--locked".to_string()));
+    }
+
+    #[test]
+    fn cargo_metadata_args_forward_only_feature_flags() {
+        let mut cli = make_cli();
+        cli.workspace = true;
+        cli.features = Some("serde".to_string());
+        cli.all_features = true;
+        cli.no_default_features = true;
+        cli.bin = Some("unit2nix".to_string());
+        cli.package = Some("unit2nix".to_string());
+        cli.target = Some("aarch64-unknown-linux-gnu".to_string());
+        cli.build_std = Some("core,alloc".to_string());
+
+        assert_eq!(
+            cargo_metadata_args(&cli),
+            vec![
+                "metadata",
+                "--format-version=1",
+                "--locked",
+                "--features",
+                "serde",
+                "--all-features",
+                "--no-default-features",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn run_cargo_failure_includes_unit_graph_hint() {
+        let err = with_fake_cargo(
+            "echo 'nightly exploded' >&2\nexit 1",
+            || {
+                run_cargo(
+                    &["build", "--unit-graph"],
+                    Path::new("./Cargo.toml"),
+                    "cargo build --unit-graph",
+                )
+                .unwrap_err()
+                .to_string()
+            },
+        );
+
+        assert!(err.contains("nightly exploded"), "got: {err}");
+        assert!(
+            err.contains("requires nightly Rust"),
+            "unit-graph failures should include nightly hint: {err}"
+        );
+    }
+
+    #[test]
+    fn run_cargo_failure_includes_stdout_preview() {
+        let preview = "x".repeat(700);
+        let script_body = format!("printf '%s' '{preview}'\necho 'bad metadata' >&2\nexit 1");
+        let err = with_fake_cargo(&script_body, || {
+            run_cargo(
+                &["metadata"],
+                Path::new("./Cargo.toml"),
+                "cargo metadata",
+            )
+            .unwrap_err()
+            .to_string()
+        });
+
+        assert!(err.contains("bad metadata"), "got: {err}");
+        assert!(err.contains("stdout (truncated):"), "got: {err}");
+        assert!(err.contains(&"x".repeat(100)), "stdout preview missing: {err}");
+    }
 
     #[test]
     fn cargo_lock_hash_is_sha256_hex() {

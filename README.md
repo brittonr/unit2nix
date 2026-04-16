@@ -177,6 +177,12 @@ cargo unit2nix --include-dev
 nix build .#test.check.my-crate
 ```
 
+Fast Rust-side CLI integration coverage lives in `tests/cli.rs`. It exercises
+real `unit2nix` and `cargo-unit2nix` binaries against `sample_workspace`,
+covering build-plan generation, `--stdout`, `--workspace`, `--members`,
+`--check-overrides --json`, fingerprint skips, fast flag validation, and the
+user-visible `--build-std` path on a minimal `#![no_std]` fixture.
+
 ## Git dependencies
 
 Git deps are prefetched at generation time so builds stay pure. In auto mode, place a `crate-hashes.json` at the root (same format as crate2nix):

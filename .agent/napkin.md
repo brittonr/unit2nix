@@ -425,6 +425,7 @@ Changes made:
 Lessons:
 - When adding fields to `Cli`, update non-clap constructors too (`ffi.rs`, tests, helpers) or optional features can silently drift until `--all-features` validation
 - Repo-local `TMPDIR=$PWD/.tmp` avoids failures when global `/tmp` is full during `nix develop`
+- Tests using `tempfile::tempdir()` inherit `TMPDIR`; with repo-local `.tmp`, those fixtures live inside the repo git worktree. For cases that must be truly outside git (e.g. out-of-tree path-dep fallback tests), create tempdirs under `/tmp` explicitly.
 
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON

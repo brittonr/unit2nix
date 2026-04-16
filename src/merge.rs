@@ -1000,6 +1000,62 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
+    // collect_platform_features tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn collect_platform_features_splits_host_and_target_when_they_differ() {
+        let host_unit = make_unit_with_platform(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["default", "std"],
+            vec![],
+            None,
+        );
+        let target_unit = make_unit_with_platform(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["alloc"],
+            vec![],
+            Some("aarch64-unknown-none"),
+        );
+
+        let (target_features, host_features) =
+            collect_platform_features(&[(0, &host_unit), (1, &target_unit)]);
+
+        assert_eq!(target_features, vec!["alloc"]);
+        assert_eq!(host_features, Some(vec!["default".to_string(), "std".to_string()]));
+    }
+
+    #[test]
+    fn collect_platform_features_omits_host_override_when_feature_sets_match() {
+        let host_unit = make_unit_with_platform(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["default", "std"],
+            vec![],
+            None,
+        );
+        let target_unit = make_unit_with_platform(
+            "pkg#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec!["default", "std"],
+            vec![],
+            Some("aarch64-unknown-linux-gnu"),
+        );
+
+        let (target_features, host_features) =
+            collect_platform_features(&[(0, &host_unit), (1, &target_unit)]);
+
+        assert_eq!(target_features, vec!["default", "std"]);
+        assert_eq!(host_features, None);
+    }
+
+    // ---------------------------------------------------------------------------
     // collect_dependencies tests
     // ---------------------------------------------------------------------------
 
@@ -1130,6 +1186,34 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn validate_references_checks_build_dependencies() {
+        let mut crates = BTreeMap::new();
+        let mut pkg_a = make_nix_crate("pkg_a", "0.1.0");
+        pkg_a.build_dependencies = vec![NixDep {
+            package_id: "missing-build#0.9.0".to_string(),
+            extern_crate_name: "missing_build".to_string(),
+        }];
+        crates.insert("pkg_a#0.1.0".to_string(), pkg_a);
+
+        let err = validate_references(&crates).unwrap_err().to_string();
+        assert!(err.contains("reference crates not in the build plan"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_references_checks_dev_dependencies() {
+        let mut crates = BTreeMap::new();
+        let mut pkg_a = make_nix_crate("pkg_a", "0.1.0");
+        pkg_a.dev_dependencies = vec![NixDep {
+            package_id: "missing-dev#0.9.0".to_string(),
+            extern_crate_name: "missing_dev".to_string(),
+        }];
+        crates.insert("pkg_a#0.1.0".to_string(), pkg_a);
+
+        let err = validate_references(&crates).unwrap_err().to_string();
+        assert!(err.contains("reference crates not in the build plan"), "got: {err}");
+    }
+
     // ---------------------------------------------------------------------------
     // build_nix_crate tests
     // ---------------------------------------------------------------------------
@@ -1245,6 +1329,28 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[test]
+    fn build_nix_crate_proc_macro_sets_proc_macro_flag() {
+        let pkg_id = "proc_macro_dep#0.1.0";
+        let unit_graph = UnitGraph {
+            units: vec![make_unit(
+                pkg_id,
+                vec![CrateKind::ProcMacro],
+                UnitMode::Build,
+                vec![],
+                vec![],
+            )],
+            roots: vec![0],
+        };
+        let ctx = make_ctx(&unit_graph);
+        let units = vec![(0, &unit_graph.units[0])];
+
+        let result = build_nix_crate(&ctx, pkg_id, &units, None, false).unwrap();
+        let crate_info = result.expect("proc macro should build");
+        assert!(crate_info.proc_macro);
+        assert_eq!(crate_info.crate_name, "proc_macro_dep");
+    }
+
     // ---------------------------------------------------------------------------
     // classify_dev_dependencies tests
     // ---------------------------------------------------------------------------
@@ -1296,6 +1402,152 @@ mod tests {
         assert_eq!(ws_crate.dev_dependencies.len(), 1);
         assert_eq!(ws_crate.dev_dependencies[0].package_id, "dev_dep#0.3.0");
         assert_eq!(ws_crate.dev_dependencies[0].extern_crate_name, "dev_dep");
+    }
+
+    #[test]
+    fn classify_dev_dependencies_skips_run_custom_build_in_test_units() {
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "build_helper#0.1.0",
+                    vec![CrateKind::CustomBuild],
+                    UnitMode::RunCustomBuild,
+                    vec![],
+                    vec![],
+                ),
+                make_unit(
+                    "ws_member#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "build_helper")],
+                ),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_member#0.1.0".to_string()],
+        };
+
+        let mut crates = BTreeMap::new();
+        crates.insert("ws_member#0.1.0".to_string(), make_nix_crate("ws_member", "0.1.0"));
+        crates.insert("build_helper#0.1.0".to_string(), make_nix_crate("build_helper", "0.1.0"));
+
+        classify_dev_dependencies(&test_graph, &metadata, &mut crates).unwrap();
+        assert!(crates["ws_member#0.1.0"].dev_dependencies.is_empty());
+    }
+
+    #[test]
+    fn classify_dev_dependencies_deduplicates_same_dev_dep_within_member() {
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_member#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("dev_dep#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "ws_member#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "dev_dep")],
+                ),
+                make_unit(
+                    "ws_member#0.1.0",
+                    vec![CrateKind::Bin],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "dev_dep")],
+                ),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_member#0.1.0".to_string()],
+        };
+
+        let mut crates = BTreeMap::new();
+        crates.insert("ws_member#0.1.0".to_string(), make_nix_crate("ws_member", "0.1.0"));
+        crates.insert("dev_dep#0.3.0".to_string(), make_nix_crate("dev_dep", "0.3.0"));
+
+        classify_dev_dependencies(&test_graph, &metadata, &mut crates).unwrap();
+        let deps = &crates["ws_member#0.1.0"].dev_dependencies;
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].package_id, "dev_dep#0.3.0");
+    }
+
+    #[test]
+    fn classify_dev_dependencies_resets_dedup_per_workspace_member() {
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("shared_dev#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "member_a#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(2, "shared_dev")],
+                ),
+                make_unit(
+                    "member_b#0.2.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(2, "shared_dev")],
+                ),
+            ],
+            roots: vec![0, 1],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string(), "member_b#0.2.0".to_string()],
+        };
+
+        let mut crates = BTreeMap::new();
+        crates.insert("member_a#0.1.0".to_string(), make_nix_crate("member_a", "0.1.0"));
+        crates.insert("member_b#0.2.0".to_string(), make_nix_crate("member_b", "0.2.0"));
+        crates.insert("shared_dev#0.3.0".to_string(), make_nix_crate("shared_dev", "0.3.0"));
+
+        classify_dev_dependencies(&test_graph, &metadata, &mut crates).unwrap();
+        assert_eq!(crates["member_a#0.1.0"].dev_dependencies.len(), 1);
+        assert_eq!(crates["member_b#0.2.0"].dev_dependencies.len(), 1);
+        assert_eq!(crates["member_a#0.1.0"].dev_dependencies[0].package_id, "shared_dev#0.3.0");
+        assert_eq!(crates["member_b#0.2.0"].dev_dependencies[0].package_id, "shared_dev#0.3.0");
+    }
+
+    #[test]
+    fn classify_dev_dependencies_treats_test_only_member_deps_as_dev_deps() {
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("test_only_member#0.1.0", vec![CrateKind::Lib], UnitMode::Test, vec![], vec![(1, "dev_dep")]),
+                make_unit("dev_dep#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["test_only_member#0.1.0".to_string()],
+        };
+
+        let mut crates = BTreeMap::new();
+        crates.insert("test_only_member#0.1.0".to_string(), make_nix_crate("test_only_member", "0.1.0"));
+        crates.insert("dev_dep#0.3.0".to_string(), make_nix_crate("dev_dep", "0.3.0"));
+
+        classify_dev_dependencies(&test_graph, &metadata, &mut crates).unwrap();
+        let deps = &crates["test_only_member#0.1.0"].dev_dependencies;
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].package_id, "dev_dep#0.3.0");
     }
 
     // ---------------------------------------------------------------------------
@@ -1564,6 +1816,432 @@ mod tests {
             "hash".to_string(), None, None,
         ).unwrap();
         assert_eq!(plan_no_target.target, None);
+    }
+
+    #[test]
+    fn merge_cross_target_records_host_feature_override() {
+        let pkg_id = "dep#0.2.0";
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("ws_pkg#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep")]),
+                make_unit_with_platform(
+                    pkg_id,
+                    vec![CrateKind::Lib],
+                    UnitMode::Build,
+                    vec!["default", "std"],
+                    vec![],
+                    None,
+                ),
+                make_unit_with_platform(
+                    pkg_id,
+                    vec![CrateKind::Lib],
+                    UnitMode::Build,
+                    vec!["alloc"],
+                    vec![],
+                    Some("aarch64-unknown-none"),
+                ),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("ws_pkg#0.1.0", None, "/workspace/Cargo.toml"),
+                make_meta_pkg(pkg_id, Some("registry+https://github.com/rust-lang/crates.io-index"), "/registry/dep/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws_pkg#0.1.0".to_string()],
+        };
+
+        let plan = merge(
+            &unit_graph,
+            &metadata,
+            &CargoLock { package: None },
+            Some("aarch64-unknown-none"),
+            "hash".to_string(),
+            None,
+            None,
+        ).unwrap();
+
+        let dep = &plan.crates[pkg_id];
+        assert_eq!(dep.features, vec!["alloc"]);
+        assert_eq!(dep.host_features, Some(vec!["default".to_string(), "std".to_string()]));
+    }
+
+    #[test]
+    fn merge_plan_is_reference_closed_after_members_filter() {
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep")]),
+                make_unit("dep#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(2, "leaf")]),
+                make_unit("leaf#0.4.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0, 3],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("member_a#0.1.0", None, "/workspace/a/Cargo.toml"),
+                make_meta_pkg("dep#0.3.0", Some("registry+https://github.com/rust-lang/crates.io-index"), "/reg/dep/Cargo.toml"),
+                make_meta_pkg("leaf#0.4.0", Some("registry+https://github.com/rust-lang/crates.io-index"), "/reg/leaf/Cargo.toml"),
+                make_meta_pkg("member_b#0.2.0", None, "/workspace/b/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string(), "member_b#0.2.0".to_string()],
+        };
+
+        let filter = vec!["member_a".to_string()];
+        let plan = merge(
+            &unit_graph,
+            &metadata,
+            &CargoLock { package: None },
+            None,
+            "hash".to_string(),
+            None,
+            Some(&filter),
+        ).unwrap();
+
+        validate_references(&plan.crates).unwrap();
+        let root_ids: BTreeSet<_> = plan.roots.iter().cloned().collect();
+        let member_ids: BTreeSet<_> = plan.workspace_members.values().cloned().collect();
+        assert!(root_ids.is_subset(&member_ids), "roots should be selected workspace members");
+        assert!(root_ids.iter().all(|id| plan.crates.contains_key(id)), "roots must exist in crate map");
+        assert!(plan.crates.contains_key("dep#0.3.0"), "transitive dep should stay in crate map");
+        assert!(plan.crates.contains_key("leaf#0.4.0"), "transitive dep closure should stay intact");
+    }
+
+    #[test]
+    fn merge_test_graph_only_assigns_dev_dependencies_to_workspace_members() {
+        let build_graph = UnitGraph {
+            units: vec![make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep_a")])],
+            roots: vec![0],
+        };
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep_a")]),
+                make_unit("dep_a#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "ws#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(1, "dep_a"), (3, "dev_only")],
+                ),
+                make_unit("dev_only#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![make_meta_pkg("ws#0.1.0", None, "/workspace/Cargo.toml")],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws#0.1.0".to_string()],
+        };
+
+        let plan = merge(
+            &build_graph,
+            &metadata,
+            &CargoLock { package: None },
+            None,
+            "hash".to_string(),
+            Some(&test_graph),
+            None,
+        ).unwrap();
+
+        assert_eq!(plan.crates["ws#0.1.0"].dev_dependencies.len(), 1);
+        assert!(plan.crates["dep_a#0.2.0"].dev_dependencies.is_empty());
+        assert!(plan.crates["dev_only#0.3.0"].dev_dependencies.is_empty());
+        validate_references(&plan.crates).unwrap();
+    }
+
+    #[test]
+    fn merge_recovers_from_malformed_metadata_source_via_pkg_id_inference() {
+        let dep_id = "registry+https://github.com/rust-lang/crates.io-index#dep@0.2.0";
+        let unit_graph = UnitGraph {
+            units: vec![
+                make_unit("ws#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(1, "dep")]),
+                make_unit(dep_id, vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("ws#0.1.0", None, "/workspace/Cargo.toml"),
+                make_meta_pkg(dep_id, Some("sparse+https://example.invalid/index"), "/registry/dep/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws#0.1.0".to_string()],
+        };
+
+        let plan = merge(
+            &unit_graph,
+            &metadata,
+            &CargoLock { package: None },
+            None,
+            "hash".to_string(),
+            None,
+            None,
+        ).unwrap();
+
+        assert!(matches!(plan.crates[dep_id].source, Some(NixSource::CratesIo)));
+        validate_references(&plan.crates).unwrap();
+    }
+
+    #[test]
+    fn merge_build_script_dependencies_stay_separate_from_normal_dependencies() {
+        let mut lib_unit = make_unit(
+            "ws#0.1.0",
+            vec![CrateKind::Lib],
+            UnitMode::Build,
+            vec![],
+            vec![(2, "runtime_dep")],
+        );
+        lib_unit.target.src_path = "/workspace/src/lib.rs".to_string();
+
+        let mut build_script_unit = make_unit(
+            "ws#0.1.0",
+            vec![CrateKind::CustomBuild],
+            UnitMode::Build,
+            vec![],
+            vec![(3, "build_dep")],
+        );
+        build_script_unit.target.src_path = "/workspace/build-support/custom-build.rs".to_string();
+
+        let unit_graph = UnitGraph {
+            units: vec![
+                lib_unit,
+                build_script_unit,
+                make_unit(
+                    "runtime_dep#0.2.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Build,
+                    vec![],
+                    vec![],
+                ),
+                make_unit(
+                    "build_dep#0.3.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Build,
+                    vec![],
+                    vec![],
+                ),
+            ],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("ws#0.1.0", None, "/workspace/Cargo.toml"),
+                make_meta_pkg("runtime_dep#0.2.0", Some("registry+https://github.com/rust-lang/crates.io-index"), "/reg/runtime/Cargo.toml"),
+                make_meta_pkg("build_dep#0.3.0", Some("registry+https://github.com/rust-lang/crates.io-index"), "/reg/build/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["ws#0.1.0".to_string()],
+        };
+
+        let plan = merge(
+            &unit_graph,
+            &metadata,
+            &CargoLock { package: None },
+            None,
+            "hash".to_string(),
+            None,
+            None,
+        ).unwrap();
+
+        let ws = &plan.crates["ws#0.1.0"];
+        assert_eq!(ws.dependencies.len(), 1);
+        assert_eq!(ws.dependencies[0].package_id, "runtime_dep#0.2.0");
+        assert_eq!(ws.build_dependencies.len(), 1);
+        assert_eq!(ws.build_dependencies[0].package_id, "build_dep#0.3.0");
+        assert_eq!(ws.build, Some("build-support/custom-build.rs".to_string()));
+        validate_references(&plan.crates).unwrap();
+    }
+
+    #[test]
+    fn merge_bin_only_workspace_member_keeps_bin_target_metadata() {
+        let mut bin_unit = make_unit(
+            "bin_only#0.1.0",
+            vec![CrateKind::Bin],
+            UnitMode::Build,
+            vec!["cli"],
+            vec![],
+        );
+        bin_unit.target.name = "bin-only".to_string();
+        bin_unit.target.src_path = "/workspace/src/bin/main.rs".to_string();
+
+        let unit_graph = UnitGraph {
+            units: vec![bin_unit],
+            roots: vec![0],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![make_meta_pkg("bin_only#0.1.0", None, "/workspace/Cargo.toml")],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["bin_only#0.1.0".to_string()],
+        };
+
+        let plan = merge(
+            &unit_graph,
+            &metadata,
+            &CargoLock { package: None },
+            None,
+            "hash".to_string(),
+            None,
+            None,
+        ).unwrap();
+
+        let bin = &plan.crates["bin_only#0.1.0"];
+        assert_eq!(bin.features, vec!["cli"]);
+        assert_eq!(bin.lib_path, None);
+        assert_eq!(bin.lib_name, None);
+        assert_eq!(bin.crate_bin.len(), 1);
+        assert_eq!(bin.crate_bin[0].name, "bin-only");
+        assert_eq!(bin.crate_bin[0].path, "src/bin/main.rs");
+    }
+
+    #[test]
+    fn merge_members_filter_with_test_graph_keeps_selected_member_dev_dependencies() {
+        let build_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0, 1],
+        };
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "member_a#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(4, "dev_a")],
+                ),
+                make_unit(
+                    "member_b#0.2.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(5, "dev_b")],
+                ),
+                make_unit("dev_a#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("dev_b#0.4.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0, 1],
+        };
+
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("member_a#0.1.0", None, "/workspace/a/Cargo.toml"),
+                make_meta_pkg("member_b#0.2.0", None, "/workspace/b/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string(), "member_b#0.2.0".to_string()],
+        };
+        let filter = vec!["member_a".to_string()];
+
+        let plan = merge(
+            &build_graph,
+            &metadata,
+            &CargoLock { package: None },
+            None,
+            "hash".to_string(),
+            Some(&test_graph),
+            Some(&filter),
+        ).unwrap();
+
+        assert_eq!(plan.workspace_members.len(), 1);
+        assert_eq!(plan.workspace_members.get("member_a"), Some(&"member_a#0.1.0".to_string()));
+        assert_eq!(plan.roots, vec!["member_a#0.1.0".to_string()]);
+        assert_eq!(plan.crates["member_a#0.1.0"].dev_dependencies.len(), 1);
+        assert_eq!(plan.crates["member_a#0.1.0"].dev_dependencies[0].package_id, "dev_a#0.3.0");
+        validate_references(&plan.crates).unwrap();
+    }
+
+    #[test]
+    fn merge_matrix_preserves_internal_crate_graph_across_filter_and_test_graph_variants() {
+        let build_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(2, "shared")]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(2, "shared")]),
+                make_unit("shared#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+            ],
+            roots: vec![0, 1],
+        };
+        let test_graph = UnitGraph {
+            units: vec![
+                make_unit("member_a#0.1.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(2, "shared")]),
+                make_unit("member_b#0.2.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![(2, "shared")]),
+                make_unit("shared#0.3.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("dev_a#0.4.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit("dev_b#0.5.0", vec![CrateKind::Lib], UnitMode::Build, vec![], vec![]),
+                make_unit(
+                    "member_a#0.1.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(2, "shared"), (3, "dev_a")],
+                ),
+                make_unit(
+                    "member_b#0.2.0",
+                    vec![CrateKind::Lib],
+                    UnitMode::Test,
+                    vec![],
+                    vec![(2, "shared"), (4, "dev_b")],
+                ),
+            ],
+            roots: vec![0, 1],
+        };
+        let metadata = CargoMetadata {
+            packages: vec![
+                make_meta_pkg("member_a#0.1.0", None, "/workspace/a/Cargo.toml"),
+                make_meta_pkg("member_b#0.2.0", None, "/workspace/b/Cargo.toml"),
+                make_meta_pkg("shared#0.3.0", Some("registry+https://github.com/rust-lang/crates.io-index"), "/reg/shared/Cargo.toml"),
+            ],
+            workspace_root: "/workspace".to_string(),
+            workspace_members: vec!["member_a#0.1.0".to_string(), "member_b#0.2.0".to_string()],
+        };
+
+        for use_test_graph in [false, true] {
+            for filter in [None, Some(vec!["member_a".to_string()])] {
+                let plan = merge(
+                    &build_graph,
+                    &metadata,
+                    &CargoLock { package: None },
+                    None,
+                    "hash".to_string(),
+                    use_test_graph.then_some(&test_graph),
+                    filter.as_deref(),
+                ).unwrap();
+
+                validate_references(&plan.crates).unwrap();
+                assert!(plan.crates.contains_key("member_a#0.1.0"));
+                assert!(plan.crates.contains_key("member_b#0.2.0"));
+                assert!(plan.crates.contains_key("shared#0.3.0"));
+
+                if let Some(filter) = &filter {
+                    assert_eq!(plan.workspace_members.len(), 1, "filter={filter:?} test_graph={use_test_graph}");
+                    assert_eq!(plan.workspace_members.get("member_a"), Some(&"member_a#0.1.0".to_string()));
+                    assert_eq!(plan.roots, vec!["member_a#0.1.0".to_string()]);
+                } else {
+                    assert_eq!(plan.workspace_members.len(), 2, "test_graph={use_test_graph}");
+                    assert_eq!(plan.roots.len(), 2, "test_graph={use_test_graph}");
+                }
+
+                if use_test_graph {
+                    assert_eq!(plan.crates["member_a#0.1.0"].dev_dependencies.len(), 1);
+                    assert_eq!(plan.crates["member_b#0.2.0"].dev_dependencies.len(), 1);
+                } else {
+                    assert!(plan.crates["member_a#0.1.0"].dev_dependencies.is_empty());
+                    assert!(plan.crates["member_b#0.2.0"].dev_dependencies.is_empty());
+                }
+            }
+        }
     }
 
     #[test]

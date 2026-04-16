@@ -220,6 +220,71 @@ pub fn prefetch_git_sources(plan: &mut NixBuildPlan) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::{NixBuildPlan, NixCrate};
+    use crate::test_support::env_lock;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    fn with_fake_prefetch<T>(script_body: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(body) = script_body {
+            let path = dir.path().join("nix-prefetch-git");
+            std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}\n")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&path).unwrap().permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&path, perms).unwrap();
+            }
+        }
+
+        let old_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", dir.path());
+        let result = f();
+        match old_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        result
+    }
+
+    fn make_plan_with_git_crates(crates: Vec<(&str, &str, &str)>) -> NixBuildPlan {
+        let mut plan_crates = BTreeMap::new();
+        for (pkg_id, url, rev) in crates {
+            let crate_info = NixCrate {
+                crate_name: pkg_id.split('#').next().unwrap_or(pkg_id).to_string(),
+                version: "0.1.0".to_string(),
+                edition: "2021".to_string(),
+                source: Some(NixSource::Git {
+                    url: url.to_string(),
+                    rev: rev.to_string(),
+                    sub_dir: None,
+                    sha256: None,
+                }),
+                ..NixCrate::default()
+            };
+            plan_crates.insert(pkg_id.to_string(), crate_info);
+        }
+        NixBuildPlan {
+            version: 1,
+            workspace_root: "/workspace".to_string(),
+            roots: vec![],
+            workspace_members: BTreeMap::new(),
+            target: None,
+            cargo_lock_hash: "hash".to_string(),
+            inputs_hash: None,
+            crates: plan_crates,
+        }
+    }
+
+    fn write_hashes_fixture(dir: &tempfile::TempDir, content: &str) -> PathBuf {
+        let manifest_path = dir.path().join("Cargo.toml");
+        std::fs::write(dir.path().join("crate-hashes.json"), content).unwrap();
+        std::fs::write(&manifest_path, "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n").unwrap();
+        manifest_path
+    }
 
     #[test]
     fn parse_key_with_rev() {
@@ -251,5 +316,204 @@ mod tests {
         let (url, rev) = parse_crate_hash_key(key).unwrap();
         assert_eq!(url, "https://github.com/s2-streamstore/mad-turmoil");
         assert_eq!(rev, Some("ef75169".to_string()));
+    }
+
+    #[test]
+    fn apply_crate_hashes_matches_exact_url_and_rev() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = write_hashes_fixture(
+            &dir,
+            r#"{
+  "https://example.com/repo.git?rev=abc123#crate-a@0.1.0": "sha256-exact"
+}"#,
+        );
+        let mut plan = make_plan_with_git_crates(vec![
+            ("crate-a#0.1.0", "https://example.com/repo.git", "abc123"),
+            ("crate-b#0.1.0", "https://example.com/repo.git", "def456"),
+        ]);
+
+        apply_crate_hashes(&mut plan, &manifest_path).unwrap();
+
+        match &plan.crates["crate-a#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256.as_deref(), Some("sha256-exact")),
+            other => panic!("expected git source, got {other:?}"),
+        }
+        match &plan.crates["crate-b#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256, &None),
+            other => panic!("expected git source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_crate_hashes_matches_url_only_and_shares_across_multiple_crates() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = write_hashes_fixture(
+            &dir,
+            r#"{
+  "https://example.com/monorepo.git#crate-a@0.1.0": "sha256-shared"
+}"#,
+        );
+        let mut plan = make_plan_with_git_crates(vec![
+            ("crate-a#0.1.0", "https://example.com/monorepo.git", "abc123"),
+            ("crate-b#0.1.0", "https://example.com/monorepo.git", "def456"),
+        ]);
+
+        apply_crate_hashes(&mut plan, &manifest_path).unwrap();
+
+        for pkg_id in ["crate-a#0.1.0", "crate-b#0.1.0"] {
+            match &plan.crates[pkg_id].source {
+                Some(NixSource::Git { sha256, .. }) => {
+                    assert_eq!(sha256.as_deref(), Some("sha256-shared"), "pkg_id: {pkg_id}");
+                }
+                other => panic!("expected git source, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn apply_crate_hashes_does_not_overwrite_existing_hashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = write_hashes_fixture(
+            &dir,
+            r#"{
+  "https://example.com/repo.git?rev=abc123#crate-a@0.1.0": "sha256-new"
+}"#,
+        );
+        let mut plan = make_plan_with_git_crates(vec![("crate-a#0.1.0", "https://example.com/repo.git", "abc123")]);
+        if let Some(NixSource::Git { sha256, .. }) = &mut plan.crates.get_mut("crate-a#0.1.0").unwrap().source {
+            *sha256 = Some("sha256-existing".to_string());
+        }
+
+        apply_crate_hashes(&mut plan, &manifest_path).unwrap();
+
+        match &plan.crates["crate-a#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256.as_deref(), Some("sha256-existing")),
+            other => panic!("expected git source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_git_reports_missing_binary() {
+        let err = with_fake_prefetch(None, || {
+            prefetch_git("https://example.com/repo.git", "abc123")
+                .unwrap_err()
+                .to_string()
+        });
+        assert!(err.contains("nix-prefetch-git not found"), "got: {err}");
+    }
+
+    #[test]
+    fn prefetch_git_reports_stderr_on_failure() {
+        let err = with_fake_prefetch(Some("echo 'network exploded' >&2\nexit 1"), || {
+            prefetch_git("https://example.com/repo.git", "deadbeef")
+                .unwrap_err()
+                .to_string()
+        });
+        assert!(err.contains("network exploded"), "got: {err}");
+        assert!(err.contains("git ls-remote https://example.com/repo.git"), "got: {err}");
+    }
+
+    #[test]
+    fn prefetch_git_parses_json_output() {
+        let hash = with_fake_prefetch(
+            Some("printf '{\"sha256\":\"sha256-fake\"}'"),
+            || prefetch_git("https://example.com/repo.git", "abc123").unwrap(),
+        );
+        assert_eq!(hash, "sha256-fake");
+    }
+
+    #[test]
+    fn prefetch_git_sources_deduplicates_by_url_and_rev() {
+        let log_dir = tempfile::tempdir().unwrap();
+        let log_path = log_dir.path().join("prefetch.log");
+        let script = format!(
+            "printf '%s\\n' \"$*\" >> '{}'\nprintf '{{\"sha256\":\"sha256-fake\"}}'",
+            log_path.display()
+        );
+        let mut plan = make_plan_with_git_crates(vec![
+            ("crate-a#0.1.0", "https://example.com/repo.git", "abc123"),
+            ("crate-b#0.1.0", "https://example.com/repo.git", "abc123"),
+            ("crate-c#0.1.0", "https://example.com/repo.git", "def456"),
+        ]);
+
+        with_fake_prefetch(Some(&script), || prefetch_git_sources(&mut plan).unwrap());
+
+        let log = std::fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<_> = log.lines().collect();
+        assert_eq!(lines.len(), 2, "expected one prefetch per unique (url, rev), got: {lines:?}");
+        for pkg_id in ["crate-a#0.1.0", "crate-b#0.1.0", "crate-c#0.1.0"] {
+            match &plan.crates[pkg_id].source {
+                Some(NixSource::Git { sha256, .. }) => {
+                    assert_eq!(sha256.as_deref(), Some("sha256-fake"), "pkg_id: {pkg_id}");
+                }
+                other => panic!("expected git source, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn prefetch_git_sources_continues_after_individual_failures() {
+        let script = "
+rev=''
+while [ $# -gt 0 ]; do
+  if [ \"$1\" = '--rev' ]; then
+    shift
+    rev=\"$1\"
+    break
+  fi
+  shift
+done
+if [ \"$rev\" = 'badrev' ]; then
+  echo 'cannot prefetch badrev' >&2
+  exit 1
+fi
+printf '{\"sha256\":\"sha256-good\"}'
+";
+        let mut plan = make_plan_with_git_crates(vec![
+            ("crate-good#0.1.0", "https://example.com/repo.git", "goodrev"),
+            ("crate-bad#0.1.0", "https://example.com/repo.git", "badrev"),
+        ]);
+
+        with_fake_prefetch(Some(script), || prefetch_git_sources(&mut plan).unwrap());
+
+        match &plan.crates["crate-good#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256.as_deref(), Some("sha256-good")),
+            other => panic!("expected git source, got {other:?}"),
+        }
+        match &plan.crates["crate-bad#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256, &None),
+            other => panic!("expected git source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_git_sources_skips_crates_with_existing_hashes() {
+        let log_dir = tempfile::tempdir().unwrap();
+        let log_path = log_dir.path().join("prefetch.log");
+        let script = format!(
+            "printf '%s\\n' \"$*\" >> '{}'\nprintf '{{\"sha256\":\"sha256-fake\"}}'",
+            log_path.display()
+        );
+        let mut plan = make_plan_with_git_crates(vec![
+            ("crate-hashed#0.1.0", "https://example.com/repo.git", "abc123"),
+            ("crate-missing#0.1.0", "https://example.com/repo.git", "def456"),
+        ]);
+        if let Some(NixSource::Git { sha256, .. }) = &mut plan.crates.get_mut("crate-hashed#0.1.0").unwrap().source {
+            *sha256 = Some("sha256-existing".to_string());
+        }
+
+        with_fake_prefetch(Some(&script), || prefetch_git_sources(&mut plan).unwrap());
+
+        let log = std::fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<_> = log.lines().collect();
+        assert_eq!(lines.len(), 1, "only unhashed crate should be prefetched: {lines:?}");
+        match &plan.crates["crate-hashed#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256.as_deref(), Some("sha256-existing")),
+            other => panic!("expected git source, got {other:?}"),
+        }
+        match &plan.crates["crate-missing#0.1.0"].source {
+            Some(NixSource::Git { sha256, .. }) => assert_eq!(sha256.as_deref(), Some("sha256-fake")),
+            other => panic!("expected git source, got {other:?}"),
+        }
     }
 }

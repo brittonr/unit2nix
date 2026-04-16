@@ -559,4 +559,42 @@ mod tests {
             "https://gitlab.com/org/project.git"
         );
     }
+
+    #[test]
+    fn normalize_git_url_is_idempotent_for_supported_forms() {
+        for host in ["github.com", "gitlab.com"] {
+            for org in ["org", "team-name"] {
+                for repo in ["repo", "tool-kit"] {
+                    let expected = format!("https://{host}/{org}/{repo}.git");
+                    for candidate in [
+                        format!("git@{host}:{org}/{repo}.git"),
+                        format!("ssh://git@{host}/{org}/{repo}.git"),
+                        expected.clone(),
+                    ] {
+                        let normalized = normalize_git_url(&candidate);
+                        assert_eq!(normalized, expected, "candidate: {candidate}");
+                        assert_eq!(
+                            normalize_git_url(&normalized),
+                            normalized,
+                            "normalization should be idempotent for {candidate}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn detect_stdlib_source_rejects_generated_non_stdlib_paths() {
+        for prefix in ["/home/user/project", "/tmp/build/workspace", "/nix/store/abc/library"] {
+            for suffix in ["core", "alloc", "vendor/compiler_builtins"] {
+                let pkg_id = format!("path+file://{prefix}/{suffix}#0.1.0");
+                assert_eq!(
+                    detect_stdlib_source(&pkg_id),
+                    None,
+                    "non-rustlib path should not be treated as stdlib: {pkg_id}"
+                );
+            }
+        }
+    }
 }
