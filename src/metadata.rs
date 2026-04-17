@@ -22,11 +22,23 @@ pub struct MetadataPackage {
     pub source: Option<String>,
     pub links: Option<String>,
     pub manifest_path: String,
+    #[serde(default)]
+    pub targets: Vec<MetadataTarget>,
     pub authors: Option<Vec<String>>,
     pub description: Option<String>,
     pub homepage: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
+}
+
+/// A target entry from cargo metadata (lib, bin, test, bench, etc.).
+#[derive(Debug, Deserialize)]
+pub struct MetadataTarget {
+    pub kind: Vec<String>,
+    pub name: String,
+    pub src_path: String,
+    #[serde(default, rename = "required-features")]
+    pub required_features: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,8 @@ pub struct NixCrate {
     pub lib_name: Option<String>,
     pub lib_crate_types: Vec<String>,
     pub crate_bin: Vec<NixBinTarget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crate_tests: Vec<NixTestTarget>,
     pub links: Option<String>,
     // Package metadata (for CARGO_PKG_* env vars in build scripts)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -133,4 +135,14 @@ pub struct NixDep {
 pub struct NixBinTarget {
     pub name: String,
     pub path: String,
+}
+
+/// A test target within a crate (from `[[test]]` in Cargo.toml).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NixTestTarget {
+    pub name: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_features: Vec<String>,
 }

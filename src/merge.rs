@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 
 use crate::metadata::{CargoLock, CargoMetadata, MetadataPackage};
-use crate::output::{NixBuildPlan, NixBinTarget, NixCrate, NixDep, NixSource, BUILD_PLAN_VERSION};
+use crate::output::{NixBuildPlan, NixBinTarget, NixCrate, NixDep, NixSource, NixTestTarget, BUILD_PLAN_VERSION};
 use crate::source::{infer_source_from_pkg_id, parse_source};
 use crate::unit_graph::{Unit, UnitGraph, UnitMode};
 
@@ -182,6 +182,20 @@ fn build_nix_crate(
         vec![]
     };
 
+    let crate_tests: Vec<NixTestTarget> = meta_pkg
+        .map(|m| {
+            m.targets
+                .iter()
+                .filter(|t| t.kind.iter().any(|k| k == "test") && !t.required_features.is_empty())
+                .map(|t| NixTestTarget {
+                    name: t.name.clone(),
+                    path: make_relative(&t.src_path, crate_root),
+                    required_features: t.required_features.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     let links = meta_pkg.and_then(|m| m.links.clone());
 
     let build = build_script_unit.and_then(|(_, bs_unit)| {
@@ -220,6 +234,7 @@ fn build_nix_crate(
         lib_name,
         lib_crate_types,
         crate_bin,
+        crate_tests,
         links,
         authors,
         description,
@@ -786,6 +801,7 @@ mod tests {
             source: source.map(str::to_string),
             manifest_path: manifest_path.to_string(),
             links: None,
+            targets: vec![],
             authors: Some(vec!["Test Author <test@example.com>".to_string()]),
             description: Some("A test package".to_string()),
             homepage: None,

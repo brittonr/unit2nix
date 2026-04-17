@@ -348,6 +348,32 @@ let
           ;
         procMacro = crateInfo.procMacro or false;
         crateBin = crateInfo.crateBin or [ ];
+      }
+      # When test targets have requiredFeatures, inject a preBuild hook
+      # that removes test files whose features aren't satisfied. This runs
+      # before buildRustCrate's blind `find tests/ -name '*.rs'` scan.
+      // (
+        let
+          crateTests = crateInfo.crateTests or [ ];
+          testsWithReqFeatures = builtins.filter (t: (t.requiredFeatures or [ ]) != [ ]) crateTests;
+          excludeSnippets = map (
+            t:
+            let
+              haveAll = lib.intersectLists t.requiredFeatures features == t.requiredFeatures;
+            in
+            lib.optionalString (!haveAll) ''
+              if [ -f "${t.path}" ]; then
+                echo "Excluding test ${t.name}: missing required features ${builtins.toJSON t.requiredFeatures}"
+                rm -f "${t.path}"
+              fi
+            ''
+          ) testsWithReqFeatures;
+          snippet = lib.concatStrings excludeSnippets;
+        in
+        lib.optionalAttrs (snippet != "") {
+          preBuild = snippet;
+        }
+      ) // {
         authors = crateInfo.authors or [ ];
 
         # Cargo env vars that buildRustCrate doesn't set.
