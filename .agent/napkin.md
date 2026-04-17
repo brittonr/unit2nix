@@ -427,6 +427,11 @@ Lessons:
 - Repo-local `TMPDIR=$PWD/.tmp` avoids failures when global `/tmp` is full during `nix develop`
 - Tests using `tempfile::tempdir()` inherit `TMPDIR`; with repo-local `.tmp`, those fixtures live inside the repo git worktree. For cases that must be truly outside git (e.g. out-of-tree path-dep fallback tests), create tempdirs under `/tmp` explicitly.
 
+## Session: 2026-04-16 #2 — benchmark harness notes
+Changes made:
+- **Benchmarking**: `nixpkgs#crate2nix` package lacks `generate --format json`; use `github:nix-community/crate2nix` when validating the experimental JSON mode from upstream docs
+- **Dead end**: Compacting or pruning checked-in build-plan JSON files reduced bytes but did not produce a clear `nix-instantiate` win for `lib/build-from-unit-graph.nix`; likely focus on consumer logic, not raw JSON whitespace
+
 ## Domain Notes
 - Multi-module Rust CLI (~8 files in src/) that merges cargo unit-graph + metadata + Cargo.lock into JSON
 - Nix consumer in lib/build-from-unit-graph.nix + lib/fetch-source.nix

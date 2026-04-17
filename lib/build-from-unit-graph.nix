@@ -30,7 +30,7 @@
   # Optional: additional crate overrides merged ON TOP of the default stack
   # (pkgs.defaultCrateOverrides + unit2nix built-ins). Use this for project-specific
   # -sys crate overrides without repeating well-known boilerplate.
-  extraCrateOverrides ? {},
+  extraCrateOverrides ? { },
   # Skip the Cargo.lock staleness check (default: false).
   # Set to true when src filtering strips Cargo.lock or for other edge cases.
   skipStalenessCheck ? false,
@@ -40,7 +40,7 @@
   skipTargetCheck ? false,
   # Extra arguments passed to clippy-driver (e.g. ["-D" "warnings"]).
   # Used by the .clippy output — has no effect on normal builds.
-  clippyArgs ? [],
+  clippyArgs ? [ ],
   # Optional: custom Rust toolchain containing rustc + clippy-driver.
   # When set, the .clippy output uses this instead of pkgs.clippy + pkgs.rustc.
   # Required when buildRustCrateForPkgs uses a custom toolchain (e.g. from
@@ -68,7 +68,7 @@
   #   inputs.sibling-repo = { url = "github:user/sibling-repo"; flake = false; };
   #   externalSources."/home/user/sibling-repo/crates/foo" =
   #     "${sibling-repo}/crates/foo";
-  externalSources ? {},
+  externalSources ? { },
 }:
 
 let
@@ -80,6 +80,15 @@ let
       builtins.fromJSON (builtins.unsafeDiscardStringContext (builtins.readFile resolvedJson))
     else
       throw "build-from-unit-graph.nix: either resolvedJson or resolvedData must be provided";
+
+  resolvedWorkspaceMembers = resolved.workspaceMembers or { };
+  crateInfos = resolved.crates;
+  crateNameByPackageId = lib.mapAttrs (_: info: info.crateName) crateInfos;
+  crateVersionByPackageId = lib.mapAttrs (_: info: info.version) crateInfos;
+  crateExternNameByPackageId = lib.mapAttrs (
+    _: crateName: builtins.replaceStrings [ "-" ] [ "_" ] crateName
+  ) crateNameByPackageId;
+  crateProcMacroByPackageId = lib.mapAttrs (_: info: info.procMacro or false) crateInfos;
 
   # Staleness check: verify build-plan.json matches the current Cargo.lock.
   # Skipped when: check is disabled, hash is absent (old unit2nix), or Cargo.lock missing.
@@ -119,23 +128,23 @@ let
     if skipTargetCheck then
       true
     else if planTarget != null && planTarget != hostConfig then
-      builtins.trace
-        ("unit2nix: WARNING — build plan target '${planTarget}' differs from "
-          + "pkgs host platform '${hostConfig}'. "
-          + "For cross-compilation, use: pkgs.pkgsCross.<platform> or matching --target."
-          + " Set skipTargetCheck = true to suppress this warning.")
-        true
+      builtins.trace (
+        "unit2nix: WARNING — build plan target '${planTarget}' differs from "
+        + "pkgs host platform '${hostConfig}'. "
+        + "For cross-compilation, use: pkgs.pkgsCross.<platform> or matching --target."
+        + " Set skipTargetCheck = true to suppress this warning."
+      ) true
     else
       true;
 
   # Workspace member filtering: validate and filter when `members` is set.
-  allWorkspaceMemberNames = builtins.attrNames (resolved.workspaceMembers or {});
+  allWorkspaceMemberNames = builtins.attrNames resolvedWorkspaceMembers;
   _membersValidation =
     if members != null then
       let
         invalid = builtins.filter (m: !(lib.elem m allWorkspaceMemberNames)) members;
       in
-      if invalid != [] then
+      if invalid != [ ] then
         builtins.throw (
           "unit2nix: unknown workspace member(s): ${builtins.concatStringsSep ", " invalid}. "
           + "Valid members: ${builtins.concatStringsSep ", " allWorkspaceMemberNames}"
@@ -148,22 +157,27 @@ let
   filteredWorkspaceMembers =
     assert _membersValidation;
     if members != null then
-      lib.filterAttrs (name: _: lib.elem name members) (resolved.workspaceMembers or {})
+      lib.filterAttrs (name: _: lib.elem name members) resolvedWorkspaceMembers
     else
-      (resolved.workspaceMembers or {});
+      resolvedWorkspaceMembers;
 
-  fetchSource = import ./fetch-source.nix { inherit pkgs src rustSrcPath externalSources; };
+  fetchSource = import ./fetch-source.nix {
+    inherit
+      pkgs
+      src
+      rustSrcPath
+      externalSources
+      ;
+  };
 
   # Stdlib crate detection for build-std support.
   # When a build plan contains stdlib crates (core, alloc, compiler_builtins),
   # they must be built for the TARGET but NOT for the HOST. The host rustc
   # already provides these via its sysroot — passing them as --extern causes
   # "duplicate lang item" errors.
-  stdlibPackageIds = lib.filterAttrs
-    (_pid: info: (info.source.type or null) == "stdlib")
-    resolved.crates;
+  stdlibPackageIds = lib.filterAttrs (_pid: info: (info.source.type or null) == "stdlib") crateInfos;
   isStdlibCrate = packageId: stdlibPackageIds ? ${packageId};
-  hasStdlibCrates = stdlibPackageIds != {};
+  hasStdlibCrates = stdlibPackageIds != { };
 
   # Built-in crate overrides from unit2nix (ring, tikv-jemalloc-sys, etc.)
   crateOverridesLib = import ./crate-overrides.nix { inherit pkgs; };
@@ -188,7 +202,9 @@ let
   # build scripts and proc-macros. Stdlib crates are excluded — the host
   # rustc provides core/alloc via its sysroot.
   mkBuiltByPackageIdByPkgs =
-    { isHost ? false }:
+    {
+      isHost ? false,
+    }:
     cratePkgs:
     let
       buildRustCrate =
@@ -202,14 +218,14 @@ let
       # would cause "duplicate lang item" errors.
       buildableCrates =
         if isHost && hasStdlibCrates then
-          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) crateInfos
         else
-          resolved.crates;
+          crateInfos;
 
       self = {
         # Each crate keyed by its full package ID
         crates = lib.mapAttrs (
-          packageId: _: buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId {}
+          packageId: _: buildCrate { inherit isHost; } self cratePkgs buildRustCrate packageId { }
         ) buildableCrates;
 
         # For proc-macro / build-dep host platform builds
@@ -227,25 +243,19 @@ let
   # mkBuiltByPackageIdByPkgs. On the host path, stdlib crate deps are
   # filtered out — the host rustc provides core/alloc via its sysroot.
   buildCrate =
-    hostCtx:
-    self: cratePkgs: buildRustCrate: packageId:
-    { includeDevDeps ? false }:
+    hostCtx: self: cratePkgs: buildRustCrate: packageId:
+    {
+      includeDevDeps ? false,
+    }:
     let
       isHost = hostCtx.isHost or false;
-      crateInfo = resolved.crates.${packageId};
-
-      # Skip stdlib deps on the host path — the host rustc sysroot provides them.
-      skipStdlibDep = dep: isHost && hasStdlibCrates && isStdlibCrate dep.packageId;
+      crateInfo = crateInfos.${packageId};
 
       # Resolve a normal dependency to its derivation.
       # Proc-macro deps must be built for the build platform (they run at compile time).
       depDrv =
         dep:
-        let
-          depInfo = resolved.crates.${dep.packageId} or null;
-          isProcMacro = depInfo != null && (depInfo.procMacro or false);
-        in
-        if isProcMacro then
+        if crateProcMacroByPackageId.${dep.packageId} then
           self.build.crates.${dep.packageId}
         else
           self.crates.${dep.packageId};
@@ -254,10 +264,19 @@ let
       # into the build script which executes at build time, not on the target).
       buildDepDrv = dep: self.build.crates.${dep.packageId};
 
-      normalDeps = builtins.filter (dep: !skipStdlibDep dep) (crateInfo.dependencies or [ ]);
-      devDeps = if includeDevDeps
-        then builtins.filter (dep: !skipStdlibDep dep) (crateInfo.devDependencies or [ ])
-        else [ ];
+      normalDeps =
+        if isHost && hasStdlibCrates then
+          builtins.filter (dep: !isStdlibCrate dep.packageId) (crateInfo.dependencies or [ ])
+        else
+          crateInfo.dependencies or [ ];
+      devDeps =
+        if includeDevDeps then
+          if isHost && hasStdlibCrates then
+            builtins.filter (dep: !isStdlibCrate dep.packageId) (crateInfo.devDependencies or [ ])
+          else
+            crateInfo.devDependencies or [ ]
+        else
+          [ ];
 
       dependencies = map depDrv (normalDeps ++ devDeps);
       buildDependencies = map buildDepDrv (crateInfo.buildDependencies or [ ]);
@@ -265,23 +284,15 @@ let
       # Compute crate renames: when externCrateName differs from the dep's crateName
       allDeps = normalDeps ++ devDeps ++ (crateInfo.buildDependencies or [ ]);
       renamedDeps = builtins.filter (
-        dep:
-        let
-          depInfo = resolved.crates.${dep.packageId} or null;
-          depCrateName = if depInfo != null then
-            builtins.replaceStrings [ "-" ] [ "_" ] depInfo.crateName
-          else
-            dep.externCrateName;
-        in
-        dep.externCrateName != depCrateName
+        dep: dep.externCrateName != crateExternNameByPackageId.${dep.packageId}
       ) allDeps;
 
       crateRenames =
         let
-          grouped = lib.groupBy (dep: (resolved.crates.${dep.packageId}).crateName) renamedDeps;
+          grouped = lib.groupBy (dep: crateNameByPackageId.${dep.packageId}) renamedDeps;
           versionAndRename = dep: {
             rename = dep.externCrateName;
-            version = (resolved.crates.${dep.packageId}).version;
+            version = crateVersionByPackageId.${dep.packageId};
           };
         in
         lib.mapAttrs (_name: builtins.map versionAndRename) grouped;
@@ -289,7 +300,8 @@ let
       crateSrc = fetchSource crateInfo;
 
       # Pass a field through to buildRustCrate only when it's non-null.
-      optionalField = field:
+      optionalField =
+        field:
         lib.optionalAttrs ((crateInfo.${field} or null) != null) {
           ${field} = crateInfo.${field};
         };
@@ -297,10 +309,7 @@ let
       # For cross builds, host and target can have different features.
       # When isHost, prefer hostFeatures (if present) over target features.
       features =
-        if isHost then
-          crateInfo.hostFeatures or crateInfo.features or [ ]
-        else
-          crateInfo.features or [ ];
+        if isHost then crateInfo.hostFeatures or crateInfo.features or [ ] else crateInfo.features or [ ];
 
       # Warn about -sys crates with `links` that have no override configured.
       linksValue = crateInfo.links or null;
@@ -309,18 +318,18 @@ let
       isKnownNoOverride = hasLinks && crateOverridesLib.isKnownNoOverride crateInfo.crateName linksValue;
       _linksWarning =
         if hasLinks && !hasOverride && !isKnownNoOverride then
-          builtins.trace
-            ("unit2nix: WARNING — crate '${crateInfo.crateName}' has links=\"${linksValue}\""
-              + " but no override found. It may need native libraries.\n"
-              + "  Add to your flake.nix:\n"
-              + "    extraCrateOverrides = {\n"
-              + "      ${crateInfo.crateName} = attrs: {\n"
-              + "        nativeBuildInputs = [ pkgs.pkg-config ];\n"
-              + "        buildInputs = [ pkgs.<library> ];\n"
-              + "      };\n"
-              + "    };\n"
-              + "  See docs/sys-crate-overrides.md for details.")
-            true
+          builtins.trace (
+            "unit2nix: WARNING — crate '${crateInfo.crateName}' has links=\"${linksValue}\""
+            + " but no override found. It may need native libraries.\n"
+            + "  Add to your flake.nix:\n"
+            + "    extraCrateOverrides = {\n"
+            + "      ${crateInfo.crateName} = attrs: {\n"
+            + "        nativeBuildInputs = [ pkgs.pkg-config ];\n"
+            + "        buildInputs = [ pkgs.<library> ];\n"
+            + "      };\n"
+            + "    };\n"
+            + "  See docs/sys-crate-overrides.md for details."
+          ) true
         else
           true;
     in
@@ -331,7 +340,12 @@ let
         version = crateInfo.version;
         edition = crateInfo.edition or "2021";
         src = crateSrc;
-        inherit dependencies buildDependencies crateRenames features;
+        inherit
+          dependencies
+          buildDependencies
+          crateRenames
+          features
+          ;
         procMacro = crateInfo.procMacro or false;
         crateBin = crateInfo.crateBin or [ ];
         authors = crateInfo.authors or [ ];
@@ -367,16 +381,16 @@ let
       // optionalField "repository"
     );
 
-  builtCrates = mkBuiltByPackageIdByPkgs {} pkgs;
+  builtCrates = mkBuiltByPackageIdByPkgs { } pkgs;
 
   # --- Test support (dev dependencies) ---
   #
   # When the build plan includes devDependencies (generated with --include-dev),
   # the .test output builds workspace members with dev deps included. Non-workspace
   # crates reuse the normal build (same store paths).
-  hasDevDeps = builtins.any
-    (pid: (resolved.crates.${pid}.devDependencies or []) != [])
-    (lib.attrValues (resolved.workspaceMembers or {}));
+  hasDevDeps = builtins.any (pid: (crateInfos.${pid}.devDependencies or [ ]) != [ ]) (
+    lib.attrValues resolvedWorkspaceMembers
+  );
 
   # Build a test graph for a SINGLE workspace member.
   #
@@ -388,9 +402,10 @@ let
   # `cargo test -p foo` works the same way: only foo gets dev-deps, transitive
   # deps are compiled normally.
   mkTestGraphForCrate =
-    { isHost ? false }:
-    cratePkgs:
-    targetPackageId:
+    {
+      isHost ? false,
+    }:
+    cratePkgs: targetPackageId:
     let
       normalBuilt = mkBuiltByPackageIdByPkgs { inherit isHost; } cratePkgs;
 
@@ -402,9 +417,9 @@ let
 
       buildableCrates =
         if isHost && hasStdlibCrates then
-          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) crateInfos
         else
-          resolved.crates;
+          crateInfos;
 
       self = {
         crates = lib.mapAttrs (
@@ -424,8 +439,7 @@ let
   # Public test attrs use a per-member graph so one workspace member's
   # dev-dependency cycle cannot force unrelated members into the same fixpoint.
   testGraphForPackageId =
-    packageId:
-    if hasDevDeps then mkTestGraphForCrate {} pkgs packageId else builtCrates;
+    packageId: if hasDevDeps then mkTestGraphForCrate { } pkgs packageId else builtCrates;
 
   testBuildForPackageId = packageId: (testGraphForPackageId packageId).crates.${packageId};
 
@@ -449,23 +463,23 @@ let
       rustcDrv = if rustToolchain != null then rustToolchain else pkgs.rustc;
       extraArgs = lib.concatMapStringsSep " " lib.escapeShellArg clippyArgs;
     in
-    pkgs.runCommand "clippy-as-rustc"
-      { nativeBuildInputs = [ pkgs.makeWrapper ]; }
-      ''
-        mkdir -p $out/bin $out/lib
-        # Symlink the compiler's libs (sysroot) so clippy-driver finds them
-        ln -s ${rustcDrv}/lib/* $out/lib/
+    pkgs.runCommand "clippy-as-rustc" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+      mkdir -p $out/bin $out/lib
+      # Symlink the compiler's libs (sysroot) so clippy-driver finds them
+      ln -s ${rustcDrv}/lib/* $out/lib/
 
-        # Wrap clippy-driver as "rustc" so buildRustCrate runs clippy
-        makeWrapper ${clippyDrv}/bin/clippy-driver $out/bin/rustc \
-          ${lib.optionalString (clippyArgs != []) ''--add-flags "${extraArgs}"''}
-      '';
+      # Wrap clippy-driver as "rustc" so buildRustCrate runs clippy
+      makeWrapper ${clippyDrv}/bin/clippy-driver $out/bin/rustc \
+        ${lib.optionalString (clippyArgs != [ ]) ''--add-flags "${extraArgs}"''}
+    '';
 
   # Build workspace members under clippy, reusing normal dependency builds.
   # Non-workspace crates resolve to the exact same Nix store paths — no
   # redundant compilation.
   mkClippyBuiltByPkgs =
-    { isHost ? false }:
+    {
+      isHost ? false,
+    }:
     cratePkgs:
     let
       normalBuilt = mkBuiltByPackageIdByPkgs { inherit isHost; } cratePkgs;
@@ -478,22 +492,21 @@ let
         base.override { defaultCrateOverrides = mergedOverrides; };
 
       # Clippy buildRustCrate: use clippy-driver as the compiler
-      clippyBuildRustCrate = args:
-        (normalBuildRustCrate args).override { rust = clippyRustcWrapper; };
+      clippyBuildRustCrate = args: (normalBuildRustCrate args).override { rust = clippyRustcWrapper; };
 
-      workspaceMemberIds = lib.attrValues (resolved.workspaceMembers or {});
+      workspaceMemberIds = lib.attrValues resolvedWorkspaceMembers;
 
       buildableCrates =
         if isHost && hasStdlibCrates then
-          lib.filterAttrs (pid: _: !isStdlibCrate pid) resolved.crates
+          lib.filterAttrs (pid: _: !isStdlibCrate pid) crateInfos
         else
-          resolved.crates;
+          crateInfos;
 
       self = {
         crates = lib.mapAttrs (
           packageId: _:
           if lib.elem packageId workspaceMemberIds then
-            buildCrate { inherit isHost; } self cratePkgs clippyBuildRustCrate packageId {}
+            buildCrate { inherit isHost; } self cratePkgs clippyBuildRustCrate packageId { }
           else
             normalBuilt.crates.${packageId}
         ) buildableCrates;
@@ -504,7 +517,7 @@ let
     in
     self;
 
-  clippyCrates = mkClippyBuiltByPkgs {} pkgs;
+  clippyCrates = mkClippyBuiltByPkgs { } pkgs;
 
 in
 assert _stalenessCheck;
@@ -516,12 +529,10 @@ assert _targetCheck;
   # When `members` is set, only expose selected members.
   # Internal crate graph (builtCrates, clippyCrates) still contains all crates —
   # filtering only affects what's exposed in the output attrset.
-  workspaceMembers = lib.mapAttrs (
-    _name: packageId: {
-      inherit packageId;
-      build = builtCrates.crates.${packageId};
-    }
-  ) filteredWorkspaceMembers;
+  workspaceMembers = lib.mapAttrs (_name: packageId: {
+    inherit packageId;
+    build = builtCrates.crates.${packageId};
+  }) filteredWorkspaceMembers;
 
   # Convenience accessor for single-crate projects. For multi-root workspaces
   # (e.g., `--package a --package b`), only the first root is exposed here.
@@ -551,12 +562,10 @@ assert _targetCheck;
   # in its closure resolve through normal builds. This keeps public test attrs
   # cycle-safe for workspaces whose dev-deps close a cycle through normal deps.
   test = {
-    workspaceMembers = lib.mapAttrs (
-      _name: packageId: {
-        inherit packageId;
-        build = testBuildForPackageId packageId;
-      }
-    ) filteredWorkspaceMembers;
+    workspaceMembers = lib.mapAttrs (_name: packageId: {
+      inherit packageId;
+      build = testBuildForPackageId packageId;
+    }) filteredWorkspaceMembers;
 
     allWorkspaceMembers = pkgs.symlinkJoin {
       name = "all-workspace-members-test";
@@ -575,7 +584,7 @@ assert _targetCheck;
         testBinDrv = (testBuildForPackageId packageId).override { buildTests = true; };
         crateName = resolved.crates.${packageId}.crateName;
       in
-      pkgs.runCommand "test-${crateName}" {} ''
+      pkgs.runCommand "test-${crateName}" { } ''
         if [ -d "${testBinDrv}/tests" ]; then
           for t in "${testBinDrv}"/tests/*; do
             if [ -x "$t" ]; then
@@ -593,12 +602,10 @@ assert _targetCheck;
   # compiled normally (cached). Build any member to get clippy diagnostics;
   # the build fails if clippy reports errors.
   clippy = {
-    workspaceMembers = lib.mapAttrs (
-      _name: packageId: {
-        inherit packageId;
-        build = clippyCrates.crates.${packageId};
-      }
-    ) filteredWorkspaceMembers;
+    workspaceMembers = lib.mapAttrs (_name: packageId: {
+      inherit packageId;
+      build = clippyCrates.crates.${packageId};
+    }) filteredWorkspaceMembers;
 
     allWorkspaceMembers = pkgs.symlinkJoin {
       name = "all-workspace-members-clippy";
