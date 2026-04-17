@@ -8,6 +8,9 @@ result-*
 # direnv cache
 .direnv/
 
+# repo-local temp files
+.tmp/
+
 # pi agent runtime state (skills/prompts are tracked)
 .pi/prompt-history.jsonl
 .agent/review-metrics.jsonl
