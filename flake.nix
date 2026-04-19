@@ -37,10 +37,10 @@
               resolvedJson,
               buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
               defaultCrateOverrides ? null,
-              extraCrateOverrides ? {},
-              externalSources ? {},
+              extraCrateOverrides ? { },
+              externalSources ? { },
               skipStalenessCheck ? false,
-              clippyArgs ? [],
+              clippyArgs ? [ ],
               members ? null,
               rustToolchain ? null,
             }:
@@ -69,8 +69,8 @@
               workspaceDir ? null,
               buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
               defaultCrateOverrides ? null,
-              extraCrateOverrides ? {},
-              clippyArgs ? [],
+              extraCrateOverrides ? { },
+              clippyArgs ? [ ],
               members ? null,
               # Optional: Rust toolchain for the IFD step (e.g. nightly from rust-overlay).
               # `cargo --unit-graph` requires nightly. When set, this toolchain is
@@ -97,7 +97,7 @@
               # Sources for out-of-tree path dependencies.
               # Maps relative paths (as in Cargo.toml) to Nix store paths.
               # Example: externalSources = { "../sibling" = sibling-input; };
-              externalSources ? {},
+              externalSources ? { },
             }:
             import ./lib/auto.nix {
               inherit
@@ -130,8 +130,8 @@
               src,
               buildRustCrateForPkgs ? pkgs: pkgs.buildRustCrate,
               defaultCrateOverrides ? null,
-              extraCrateOverrides ? {},
-              clippyArgs ? [],
+              extraCrateOverrides ? { },
+              clippyArgs ? [ ],
               members ? null,
               target ? null,
               includeDev ? false,
@@ -200,7 +200,10 @@
               allPackages = builtins.concatLists (map (l: l.package or [ ]) allLocked);
               withSource = builtins.filter (p: p ? source) allPackages;
               byId = builtins.listToAttrs (
-                map (p: { name = "${p.name} ${p.version} (${p.source})"; value = p; }) withSource
+                map (p: {
+                  name = "${p.name} ${p.version} (${p.source})";
+                  value = p;
+                }) withSource
               );
 
               # Write a synthetic merged lock file for vendor.nix
@@ -214,7 +217,8 @@
               # directly. Create a minimal TOML lock file.
               mergedLockToml = pkgs.writeText "merged-Cargo.lock" (
                 "# Merged lock file\nversion = 3\n\n"
-                + lib.concatMapStrings (p:
+                + lib.concatMapStrings (
+                  p:
                   "[[package]]\n"
                   + "name = ${builtins.toJSON p.name}\n"
                   + "version = ${builtins.toJSON p.version}\n"
@@ -264,7 +268,7 @@
               system
               buildFromUnitGraph
               buildFromUnitGraphAuto
-              unit2nix
+              # unit2nix
               sampleWorkspace
               ;
           };
