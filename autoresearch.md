@@ -6,7 +6,8 @@ Optimize nix-store caching behavior for Rust builds in unit2nix without overfitt
 ## Primary metric
 - `noop_rebuild_ms`
 - Measured as warm-cache wall-clock time for `nix build .#sample --no-link`
-- Current usable baseline from `411a48f`: about 88 ms steady-state
+- Best reliable result in this session family: about `59.7 ms`
+- Best benchmark-bearing baseline commit: `c87f69a`
 
 ## Harness
 Use Python timing harness, not hyperfine.
@@ -34,16 +35,19 @@ PY
 - It fails on baseline too with linker error: `mold: fatal: unknown -m argument: 64`.
 - Do not use that as acceptance gate.
 
-## Current hypotheses
-1. `lib/auto.nix` broad `cp -r ${src} source` likely harms cacheability more than fetch-source tweaks.
-2. `lib/fetch-source.nix` local-source filtering may help unrelated-file invalidation, but benefit on noop metric is noisy and not yet proven.
-3. README-touch or unrelated-file-touch benchmarks are useful as secondary evidence, but not primary metric.
-4. Auto-mode experiments need a secondary rail that does not redefine the primary harness; temporarily exposing `sample-auto` is acceptable for measurement, but do not mix auto warmup into the primary noop metric.
-5. Filtering auto-mode source did improve the secondary README-touch auto rail (~27.3 s -> ~24.6 s), but regressed the primary noop metric. This likely reflects a real tradeoff between auto invalidation breadth and steady-state noop overhead.
-6. Post-copy pruning may be a better direction than eval-time filtered sources. Early evidence suggests pruning only `result*` helps secondary auto rails substantially, but the current experiment shape still contaminates the primary metric when secondary rails run in the same command.
+## Final findings
 
-## Rules
-- Do not change benchmark workload and compare it against noop baseline.
-- Re-run promising improvements at least twice when gains are near noise floor.
-- Prefer repo-native Nix checks if a correctness rail is needed.
+1. Small and medium refactors in `flake.nix`, `lib/build-from-unit-graph.nix`, and `lib/fetch-source.nix` did not reliably improve the primary metric. Most regressed or landed within obvious noise.
+2. Warm `nix eval` of drvPaths is much slower than warm `nix build --no-link`, and `sample` vs `sample-bin` are nearly identical. This points to global flake/output evaluation overhead, not `symlinkJoin` or sample-specific wiring, as the dominant cost under the current metric.
+3. Auto-mode has a real invalidation-breadth problem: unrelated README edits are far more expensive than real source edits. Filtering/pruning the auto-mode source helped those secondary rails, but consistently hurt the primary noop metric.
+4. Commit `d4988b5` is still a worthwhile correctness fix: it makes the checks import self-contained by binding `unit2nix` explicitly in `flake.nix`. However, the immediate rerun showed the performance effect was neutral/noisy, so it should not be treated as a benchmark win.
+
+## Stop condition reached
+
+Under the current primary metric, the explored local refactor space appears exhausted. The next useful step would require changing the objective (for example, optimize auto-mode invalidation latency directly) or pursuing a larger architectural reduction in flake evaluation surface rather than continuing small speculative refactors.
+
+## Rules if this resumes
+- Do not change benchmark workload and compare it against the noop baseline.
+- Re-run promising improvements at least twice when gains are near the noise floor.
+- Keep secondary README-touch/source-touch rails separate from the primary noop benchmark.
 - Preserve semantics; no cheating by skipping work the real build would need.
