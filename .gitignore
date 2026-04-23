@@ -20,3 +20,5 @@ openspec/
 
 # benchmark results (generated)
 benches/results/
+
+.pi/
