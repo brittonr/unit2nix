@@ -69,6 +69,9 @@
   #   externalSources."/home/user/sibling-repo/crates/foo" =
   #     "${sibling-repo}/crates/foo";
   externalSources ? { },
+  # Optional extra filter for local crate sources.
+  # Receives the same (path: type:) args as cleanSourceWith.filter.
+  localSourceFilter ? null,
 }:
 
 let
@@ -167,6 +170,7 @@ let
       src
       rustSrcPath
       externalSources
+      localSourceFilter
       ;
   };
 

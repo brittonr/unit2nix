@@ -39,6 +39,7 @@
               defaultCrateOverrides ? null,
               extraCrateOverrides ? { },
               externalSources ? { },
+              localSourceFilter ? null,
               skipStalenessCheck ? false,
               clippyArgs ? [ ],
               members ? null,
@@ -53,6 +54,7 @@
                 defaultCrateOverrides
                 extraCrateOverrides
                 externalSources
+                localSourceFilter
                 skipStalenessCheck
                 clippyArgs
                 members
@@ -98,6 +100,7 @@
               # Maps relative paths (as in Cargo.toml) to Nix store paths.
               # Example: externalSources = { "../sibling" = sibling-input; };
               externalSources ? { },
+              localSourceFilter ? null,
             }:
             import ./lib/auto.nix {
               inherit
@@ -119,6 +122,7 @@
                 noDefaultFeatures
                 includeDev
                 externalSources
+                localSourceFilter
                 ;
               unit2nix = self.packages.${system}.unit2nix;
             };

@@ -82,6 +82,8 @@
   # Example (workspace has `rat-tui = { path = "../sibling/crates/rat-tui" }`):
   #   externalSources = { "../sibling" = sibling-flake-input; };
   externalSources ? {},
+  # Optional extra filter for local crate sources forwarded to buildFromUnitGraph.
+  localSourceFilter ? null,
 }:
 
 let
@@ -281,7 +283,7 @@ let
 
 in
 import ./build-from-unit-graph.nix {
-  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs members rustSrcPath;
+  inherit pkgs lib buildRustCrateForPkgs defaultCrateOverrides extraCrateOverrides clippyArgs members rustSrcPath localSourceFilter;
   src = workspaceSrc;
   resolvedJson = generatedPlan;
   skipStalenessCheck = true;

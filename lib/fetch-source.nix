@@ -18,6 +18,9 @@
   # Map of absolute filesystem paths to Nix store paths for out-of-tree path deps.
   # See build-from-unit-graph.nix externalSources for documentation.
   externalSources ? {},
+  # Optional extra filter for local crate sources.
+  # Receives the same (path: type:) arguments as cleanSourceWith.filter.
+  localSourceFilter ? null,
 }:
 
 crateInfo:
@@ -73,11 +76,18 @@ if sourceType == "local" || sourceType == null then
       path: type:
       let
         baseName = builtins.baseNameOf path;
+        keepByDefault =
+          # Standard VCS/editor filtering
+          (pkgs.lib.cleanSourceFilter path type)
+          # Cargo build artifacts
+          && baseName != "target"
+          # Common local noise that should not perturb crate store paths.
+          && baseName != ".direnv"
+          && baseName != "result"
+          && !(pkgs.lib.hasPrefix "result-" baseName);
+        keepByCaller = if localSourceFilter == null then true else localSourceFilter path type;
       in
-      # Standard VCS/editor filtering
-      (pkgs.lib.cleanSourceFilter path type)
-      # Cargo build artifacts
-      && baseName != "target";
+      keepByDefault && keepByCaller;
   }
 
 else if sourceType == "crates-io" then
@@ -123,23 +133,26 @@ else if sourceType == "stdlib" then
 else if sourceType == "git" then
   let
     sha256 = source.sha256 or null;
-    # Use builtins.fetchGit for crate source resolution. This is a Nix builtin
-    # (not a derivation), so it avoids fixed-output derivation issues with
-    # sandbox restrictions. The rev pin ensures reproducibility without needing
-    # a SHA256 hash. The .git directory is NOT included (not needed for building).
-    #
-    # vendor.nix separately fetches with pkgs.fetchgit + leaveDotGit for
-    # cargo's CARGO_HOME/git/ cache — that's the only place .git is needed.
-    #
-    # Falls back to pkgs.fetchgit with SHA256 hash when builtins.fetchGit
-    # is unavailable (shouldn't happen with Nix >= 2.4, but keeps compat).
+    # Prefer fixed-output fetches when a hash is available.
+    # This makes git sources first-class substitutable store objects instead of
+    # eval-time builtins.fetchGit results.
     repo =
-      builtins.fetchGit {
-        url = source.url;
-        rev = source.rev;
-        allRefs = true;
-        submodules = true;
-      };
+      if sha256 != null then
+        pkgs.fetchgit {
+          url = source.url;
+          rev = source.rev;
+          inherit sha256;
+          fetchSubmodules = true;
+        }
+      else
+        builtins.trace
+          "unit2nix: WARNING — git source ${source.url} at ${source.rev} has no sha256; using builtins.fetchGit reduces cross-machine cacheability"
+          (builtins.fetchGit {
+            url = source.url;
+            rev = source.rev;
+            allRefs = true;
+            submodules = true;
+          });
     subDir = source.subDir or null;
   in
   if subDir != null then repo + "/${subDir}" else repo
