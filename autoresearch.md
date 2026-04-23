@@ -40,6 +40,7 @@ PY
 3. README-touch or unrelated-file-touch benchmarks are useful as secondary evidence, but not primary metric.
 4. Auto-mode experiments need a secondary rail that does not redefine the primary harness; temporarily exposing `sample-auto` is acceptable for measurement, but do not mix auto warmup into the primary noop metric.
 5. Filtering auto-mode source did improve the secondary README-touch auto rail (~27.3 s -> ~24.6 s), but regressed the primary noop metric. This likely reflects a real tradeoff between auto invalidation breadth and steady-state noop overhead.
+6. Post-copy pruning may be a better direction than eval-time filtered sources. Early evidence suggests pruning only `result*` helps secondary auto rails substantially, but the current experiment shape still contaminates the primary metric when secondary rails run in the same command.
 
 ## Rules
 - Do not change benchmark workload and compare it against noop baseline.

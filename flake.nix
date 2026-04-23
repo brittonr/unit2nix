@@ -265,17 +265,21 @@
             sample-bin = sampleWorkspace.workspaceMembers."sample-bin".build;
           };
 
-          checks = import ./nix/checks.nix {
-            inherit
-              pkgs
-              self
-              system
-              buildFromUnitGraph
-              buildFromUnitGraphAuto
-              # unit2nix
-              sampleWorkspace
-              ;
-          };
+          checks =
+            let
+              unit2nix = self.packages.${system}.unit2nix;
+            in
+            import ./nix/checks.nix {
+              inherit
+                pkgs
+                self
+                system
+                buildFromUnitGraph
+                buildFromUnitGraphAuto
+                unit2nix
+                sampleWorkspace
+                ;
+            };
 
           devShells.default = import ./nix/devshell.nix { inherit pkgs; };
         }
