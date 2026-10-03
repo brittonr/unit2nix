@@ -179,10 +179,10 @@
             {
               pkgs ? nixpkgs.legacyPackages.${system},
               cargoLock,
-              crateHashesJson ? null,
+              gitObjectHashesJson ? null,
             }:
             import ./lib/vendor.nix {
-              inherit pkgs cargoLock crateHashesJson;
+              inherit pkgs cargoLock gitObjectHashesJson;
             };
 
           # Vendor crate sources from multiple Cargo.lock files.
@@ -192,7 +192,7 @@
             {
               pkgs ? nixpkgs.legacyPackages.${system},
               cargoLocks,
-              crateHashesJson ? null,
+              gitObjectHashesJson ? null,
             }:
             let
               lib = pkgs.lib;
@@ -233,7 +233,7 @@
               );
             in
             import ./lib/vendor.nix {
-              inherit pkgs crateHashesJson;
+              inherit pkgs gitObjectHashesJson;
               cargoLock = mergedLockToml;
             };
 

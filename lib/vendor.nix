@@ -9,7 +9,7 @@
 #     vendor = import ./vendor.nix {
 #       inherit pkgs;
 #       cargoLock = src + "/Cargo.lock";
-#       crateHashesJson = src + "/crate-hashes.json";  # optional, for git deps
+#       gitObjectHashesJson = src + "/git-object-hashes.json";  # for git deps
 #     };
 #   in {
 #     inherit (vendor) vendoredSources cargoConfig;
@@ -20,16 +20,16 @@
   lib ? pkgs.lib,
   # Path to Cargo.lock
   cargoLock,
-  # Optional: path to crate-hashes.json (SHA256 hashes for git deps)
-  crateHashesJson ? null,
+  # Optional: hash map for canonical, revision-scoped Git objects.
+  gitObjectHashesJson ? null,
 }:
 
 let
   locked = lib.importTOML cargoLock;
 
-  crateHashes =
-    if crateHashesJson != null && builtins.pathExists crateHashesJson
-    then builtins.fromJSON (builtins.readFile crateHashesJson)
+  gitObjectHashes =
+    if gitObjectHashesJson != null && builtins.pathExists gitObjectHashesJson
+    then builtins.fromJSON (builtins.readFile gitObjectHashesJson)
     else { };
 
   # Classify packages by source type.
@@ -125,21 +125,26 @@ let
   gitRepoPkgs = packagesByType."git" or [ ];
   gitRepoGroups = lib.groupBy gitRepoKey gitRepoPkgs;
 
-  fetchGitRepo = representativePkg:
+  fetchGitRepo = group:
     let
+      representativePkg = builtins.head group;
       parsed = parseGitSource representativePkg.source;
       hashKey = toHashKey representativePkg;
-      packageId = toPackageId representativePkg;
-      sha256 = crateHashes.${hashKey} or crateHashes.${packageId} or null;
+      hashes = lib.unique (builtins.filter (hash: hash != null) (map (pkg:
+        gitObjectHashes.${toHashKey pkg} or gitObjectHashes.${toPackageId pkg} or null
+      ) group));
+      sha256 =
+        if hashes == [] then null
+        else if builtins.length hashes == 1 then builtins.head hashes
+        else builtins.throw "unit2nix: conflicting Git-object hashes for ${parsed.url} at ${rev}";
 
       rev =
         if parsed.fragment != null then parsed.fragment
         else parsed.rev or (builtins.throw "unit2nix: git dep '${representativePkg.name}' has no rev in source URL");
 
-      # Fetch git dep source WITH .git directory so auto.nix can populate
-      # cargo's CARGO_HOME/git/ cache via initGitReposScript + fakeGit.
-      # postFetch strips .git/hooks to avoid FOD output references to
-      # nix store bash paths (which Nix would reject as impure).
+      # Keep the source-tree hash in crate-hashes.json separate from this
+      # revision-scoped object database. fetchgit's raw .git directory contains
+      # mutable refs, logs and pack files: hashing it directly is not stable.
       src =
         if sha256 != null then
           pkgs.fetchgit {
@@ -148,22 +153,28 @@ let
             inherit rev;
             fetchSubmodules = true;
             leaveDotGit = true;
-            postFetch = "find $out -name hooks -path '*/.git/*' -exec rm -rf {} + 2>/dev/null || true";
+            postFetch = ''
+              git init --bare -q "$out/.git-canonical"
+              rm -rf "$out/.git-canonical/hooks"
+              git -C "$out" rev-list --objects --no-walk ${lib.escapeShellArg rev} \
+                | git -C "$out" pack-objects --stdout \
+                | git --git-dir="$out/.git-canonical" unpack-objects
+              printf '%s\n' ${lib.escapeShellArg rev} > "$out/.git-canonical/shallow"
+              git --git-dir="$out/.git-canonical" update-ref refs/heads/_cargo_head ${lib.escapeShellArg rev}
+              echo 'ref: refs/heads/_cargo_head' > "$out/.git-canonical/HEAD"
+              rm -rf "$out/.git"
+              mv "$out/.git-canonical" "$out/.git"
+              find "$out" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+            '';
           }
         else
           builtins.throw ''
             unit2nix: git dependency "${representativePkg.name}" from ${parsed.url} at ${rev}
-            requires a SHA256 hash in crate-hashes.json for auto mode.
-
-            Step 1 — get the hash (note: --leave-dotGit matches fetchgit leaveDotGit):
-              nix-prefetch-git --url ${parsed.url} --rev ${rev} --fetch-submodules --leave-dotGit | jq -r .sha256
-
-            Step 2 — add it to crate-hashes.json in your workspace root:
-              {
-                "${toHashKey representativePkg}": "<sha256 from step 1>"
-              }
-
-            Step 3 — rebuild. The hash is cached; this is a one-time step per git rev.
+            requires a canonical Git-object SHA256 in git-object-hashes.json.
+            This hash is distinct from the source-tree hash in crate-hashes.json.
+            Fetch the exact revision with fetchgit leaveDotGit=true and the
+            canonical postFetch in lib/vendor.nix, then record its resulting hash
+            under "${hashKey}" in git-object-hashes.json.
           '';
     in
     {
@@ -172,7 +183,7 @@ let
     };
 
   # Fetched git repos: { "url#rev" = { src, url, rev }; }
-  gitRepos = lib.mapAttrs (_: group: fetchGitRepo (builtins.head group)) gitRepoGroups;
+  gitRepos = lib.mapAttrs (_: group: fetchGitRepo group) gitRepoGroups;
 
   # Git repos are NOT put in the vendor linkFarm. Instead, auto.nix populates
   # CARGO_HOME/git/checkouts/ so cargo finds them without network access.

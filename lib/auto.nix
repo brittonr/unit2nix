@@ -91,7 +91,6 @@ let
   workspaceSrc = if workspaceDir != null then src + "/${workspaceDir}" else src;
 
   cargoLockPath = workspaceSrc + "/Cargo.lock";
-  crateHashesPath = workspaceSrc + "/crate-hashes.json";
 
   manifestRelPath =
     if workspaceDir != null
@@ -101,15 +100,14 @@ let
   vendor = import ./vendor.nix {
     inherit pkgs lib;
     cargoLock = cargoLockPath;
-    crateHashesJson =
-      if builtins.pathExists crateHashesPath
-      then crateHashesPath
+    gitObjectHashesJson =
+      if builtins.pathExists (workspaceSrc + "/git-object-hashes.json")
+      then workspaceSrc + "/git-object-hashes.json"
       else null;
   };
 
-  # Build-time script: copy .git contents from read-only fetchgit outputs
-  # to writable bare repos. This preserves the real commit SHAs that cargo
-  # needs to resolve specific revisions, without touching the nix store.
+  # Copy canonical revision-scoped objects to writable bare repos. These
+  # preserve the original commit SHA without carrying fetchgit's mutable refs.
   initGitReposScript = lib.concatMapStrings (repo: ''
     _repo_dir="/tmp/git-repos/$(echo '${repo.url}' | sed 's|[/:]|_|g')"
     mkdir -p "$_repo_dir"
@@ -170,10 +168,8 @@ let
         # git clone --bare <url> <dest>
         dest="''${@: -1}"
         "$REAL_GIT" init --bare "$dest" 2>/dev/null
-        "$REAL_GIT" -C "$dest" fetch "$local_path" '+HEAD:refs/heads/_cargo_head' 2>/dev/null || true
-        # Import all objects so cargo can resolve any rev
-        "$REAL_GIT" -C "$dest" fetch "$local_path" 2>/dev/null || \
-        "$REAL_GIT" -C "$dest" fetch "$local_path/.git" 2>/dev/null || true
+        "$REAL_GIT" -C "$dest" fetch --update-shallow "$local_path" "+$local_rev:refs/heads/_cargo_head"
+        "$REAL_GIT" --git-dir="$dest" cat-file -e "$local_rev^{commit}"
         exit 0
         ;;
       fetch)
@@ -189,7 +185,7 @@ let
             args+=("$arg")
           fi
         done
-        exec "$REAL_GIT" "''${args[@]}"
+        exec "$REAL_GIT" fetch --update-shallow "''${args[@]:1}"
         ;;
       *)
         exec "$REAL_GIT" "$@"

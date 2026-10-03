@@ -185,13 +185,28 @@ user-visible `--build-std` path on a minimal `#![no_std]` fixture.
 
 ## Git dependencies
 
-Git deps are prefetched at generation time so builds stay pure. In auto mode, place a `crate-hashes.json` at the root (same format as crate2nix):
+Git dependencies need two independent fixed-output hashes. `crate-hashes.json`
+contains the source-tree hash consumed by the build plan (`nix-prefetch-git
+--url <url> --rev <full-commit> --fetch-submodules | jq -r .sha256`); do **not**
+pass `--leave-dotGit`. Auto mode additionally needs `git-object-hashes.json`
+in the workspace root for Cargo's exact-revision Git cache:
 
 ```json
 {
-  "https://github.com/user/repo?branch=main#crate-name@1.0.0": "sha256-..."
+  "https://github.com/user/repo.git?rev=<full-commit>#crate-name@1.0.0": "sha256-..."
 }
 ```
+
+Use a key from `crate-hashes.json` for each Git repository in the object map,
+matching the **effective Cargo.lock URL** and revision. Multiple crates from
+one repository share one object hash; conflicting entries are rejected.
+To determine the Git-object hash, put
+`sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=` in
+`git-object-hashes.json` and build the auto-mode derivation. Nix reports the
+actual hash in its fixed-output mismatch; replace the placeholder and rebuild.
+This fetch stores only the commit and its tree as canonical loose Git objects
+with a shallow boundary. A raw `nix-prefetch-git --leave-dotGit` hash is not
+interchangeable: Git refs, hooks and pack files change across fetches.
 
 ## CLI
 
